@@ -103,8 +103,25 @@ MIT License - ver [LICENSE](LICENSE) para detalles
 - **Usuario piloto**: Administrador de farmacia en el equipo
 - **Enfoque**: Documentación técnica, análisis financiero (ROI, VAN) y MVP funcional
 
-### Casos de Uso Definidos
-> 🚧 **En definición** - Pendiente especificación de los 3 casos de uso principales
+### Casos de Uso MVP (10 semanas)
+**Alcance REALISTA para timeline académico:**
+
+**Caso 1: Monitor de Stock Crítico** ⏱️ 3 semanas
+- Importar ventas históricas desde Excel/CSV
+- Algoritmo simple: promedio móvil para detectar stock bajo
+- Alertas automáticas por email/dashboard
+
+**Caso 2: Recomendador Básico de Pedidos** ⏱️ 4 semanas  
+- Análisis de ventas últimos 3-6 meses
+- Reglas simples: "si vendiste X unidades/mes, pedir Y"
+- Interface para aprobar/modificar sugerencias
+
+**Caso 3: Dashboard de Rentabilidad** ⏱️ 2 semanas
+- Visualización básica: ventas, márgenes, rotación
+- Comparación mes actual vs anterior
+- Identificación de productos más/menos rentables
+
+**NO incluye:** ML complejo, automatización de pedidos, CRM avanzado, integración en tiempo real
 
 ### Entregables Académicos
 - [ ] Documentación técnica completa
@@ -114,4 +131,3 @@ MIT License - ver [LICENSE](LICENSE) para detalles
 - [ ] Validación con datos reales
 
 ---
-
