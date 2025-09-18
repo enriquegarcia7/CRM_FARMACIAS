@@ -1,159 +1,100 @@
+SmartPharm CRM - Sistema Especializado para Farmacias
 Proyecto Capstone Duoc UC - Sede Antonio Varas
 Ingeniería en Informática 2025
-Descripción
-SmartPharm CRM es una propuesta de negocio para desarrollar el primer sistema de gestión de clientes diseñado específicamente para farmacias pequeñas en Chile. El proyecto combina análisis financiero integral, plan de gestión de proyectos PMI, y desarrollo de MVP técnico como validación del concepto.
-Problemática
-Las farmacias pequeñas carecen de herramientas CRM especializadas que comprendan:
+Descripción del Proyecto
+SmartPharm CRM es una propuesta de negocio para desarrollar el primer sistema de gestión de clientes diseñado específicamente para farmacias pequeñas en Chile. Este proyecto académico combina análisis financiero integral, plan de gestión de proyectos PMI, y desarrollo de MVP técnico como validación del concepto.
+Equipo
+RolNombreResponsabilidadLíder de ProyectoEnrique GarcíaAnálisis financiero, gestión PMI, coordinación generalValidador de MercadoDaniel AcevedoRequerimientos del sector farmacéuticoDesarrolladorBastian HartalMVP técnico, documentación de arquitectura
+Problemática Identificada
+Las farmacias pequeñas en Chile enfrentan desafíos específicos:
 
-Patrones de compra de medicamentos crónicos
-Estacionalidad de demanda farmacéutica (gripes en invierno, alergias en primavera)
-Necesidades específicas de fidelización en el sector salud
-Correlación con datos epidemiológicos públicos
+Gestión de medicamentos crónicos sin seguimiento automático
+Falta de capacidad predictiva para demanda estacional
+Análisis manual e ineficiente de ofertas de laboratorios
+Estrategias de fidelización genéricas inadecuadas para el sector
 
 Solución Propuesta
-Sistema CRM especializado con tres componentes principales:
+Sistema CRM especializado con tres módulos principales:
 
 Segmentación de clientes farmacéuticos por tipo de medicamento y frecuencia
-Análisis predictivo de demanda estacional correlacionado con datos de salud pública
-Dashboard CRM con alertas especializadas para abandono de medicamentos crónicos
+Análisis predictivo de demanda estacional
+Dashboard CRM con alertas especializadas para medicamentos habituales
 
-Equipo
-RolNombreResponsabilidadLíder de ProyectoEnrique GarcíaAnálisis financiero, gestión PMI, coordinación generalValidador de MercadoDaniel AcevedoRequerimientos del sector (5+ años administrando farmacia)DesarrolladorBastian HartalMVP técnico, documentación de arquitectura
-Estructura del Proyecto
-Documentación de Negocio (70%)
-docs/
-├── business-plan/           # Business plan ejecutivo (20-25 páginas)
-├── financial-analysis/      # Modelos ROI, VAN, TIR, proyecciones
-├── project-management/      # Cronograma PMI, presupuesto, riesgos
-└── funding-proposal/        # Estrategia de financiamiento
-Componente Técnico (30%)
-src/
-├── backend/                 # API Python para análisis de datos
-├── frontend/               # Dashboard Angular con visualizaciones
-├── data/                   # Datos históricos de farmacia piloto
-└── analysis/               # Scripts de análisis predictivo
-Cronograma de Desarrollo
-SemanasFaseEntregables1-2Análisis de MercadoInvestigación sectorial, requerimientos3-5Propuesta FinancieraBusiness plan, modelos ROI/VAN/TIR6-7Gestión de ProyectosCronograma PMI, presupuesto, riesgos8-10MVP Técnico3 funcionalidades, documentación
-MVP Técnico - 3 Funcionalidades
-1. Segmentación de Clientes
+Enfoque del Proyecto
+Duración: 10 semanas académicas
+Distribución: 70% Propuesta Financiera y Gestión de Proyectos, 30% MVP Técnico
+Fases del Proyecto
 
-Clasificación automática por medicamentos crónicos vs agudos
+Semanas 1-2: Análisis de mercado y requerimientos
+Semanas 3-5: Desarrollo de modelos financieros y business plan
+Semanas 6-7: Plan de gestión de proyectos PMI
+Semanas 8-10: Desarrollo de MVP técnico y documentación final
+
+MVP Técnico Planificado
+Funcionalidades Core
+
+Segmentación automática de clientes
+
+Clasificación por medicamentos crónicos vs agudos
 Análisis de frecuencia de compra
-Identificación de clientes de alto valor
 
-2. Predicción Estacional
 
-Análisis de ventas históricas por temporada
-Correlación básica con datos del Ministerio de Salud
-Alertas de picos de demanda anticipados
+Análisis estacional
 
-3. Dashboard CRM
+Correlación con datos históricos
+Recomendaciones de stock por temporada
 
-Visualización de patrones de clientes
-Alertas por abandono de medicamentos habituales
-Recomendaciones de stock estacional
 
-Stack Tecnológico
+Centralización de ofertas
 
-Backend: Python (Django, FastAPI, Pandas)
+Comparación de precios de laboratorios
+Recomendaciones de compra
+
+
+
+Stack Tecnológico Propuesto
+
+Backend: Python/Django
 Frontend: Angular
 Base de Datos: PostgreSQL
-Análisis: Python (análisis estadístico básico)
-Visualización: Chart.js, dashboard web
-Cloud: Google Cloud Platform (herramientas gratuitas)
+Análisis: Google Colab + Pandas
+Cloud: Google Cloud Platform
 
-Validación con Datos Reales
+Validación
 
-Farmacia piloto: Acceso a 3+ años de datos históricos
-Usuario real: Daniel Acevedo (administrador farmacia, miembro del equipo)
-Datos disponibles: 15,000+ transacciones, 2,800+ clientes únicos
-Validación continua: Testing semanal con usuario final
+Acceso a datos históricos de farmacias reales
+Validación continua con usuarios del sector farmacéutico
+Testing con casos de uso reales
 
-Instalación (MVP Técnico)
-Prerrequisitos
-bashPython 3.8+
-Node.js 16+
-PostgreSQL 12+
-Setup Backend
-bashcd backend
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver
-Setup Frontend
-bashcd frontend
-npm install
-ng serve
-Variables de Entorno
-bash# .env
-DATABASE_URL=postgresql://user:password@localhost:5432/smartpharm_db
-SECRET_KEY=your-secret-key
-DEBUG=True
+Competencias Aplicadas
+
+Propuestas de solución informática integral
+Gestión de proyectos informáticos PMI
+Desarrollo de software sistematizado
+Modelos de datos escalables
+Arquitectura sistémica empresarial
+Transformación de datos para decisiones
+
 Entregables Académicos
-Documentación de Negocio (70%):
+Documentación de Negocio (70%)
 
- Business Plan Ejecutivo (20-25 páginas)
- Análisis Financiero Completo (ROI, VAN, TIR)
- Plan de Gestión de Proyectos (PMI)
- Propuesta de Financiamiento
- Presentación Ejecutiva (Pitch Deck)
+Business Plan Ejecutivo (20-25 páginas)
+Análisis Financiero Completo (ROI, VAN, TIR)
+Plan de Gestión de Proyectos PMI
+Propuesta de Financiamiento
 
-Componente Técnico (30%):
+Componente Técnico (30%)
 
- MVP con 3 funcionalidades core
- Documentación técnica de arquitectura
- Análisis de datos validado con farmacia piloto
- Plan de escalamiento tecnológico
+MVP funcional con 3 funcionalidades
+Documentación técnica de arquitectura
+Análisis de datos con farmacia piloto
 
-Diferenciación
-
-Especialización sectorial: Único CRM diseñado para farmacias vs soluciones genéricas
-Conocimiento farmacéutico: Comprende medicamentos crónicos y estacionalidad
-Validación real: Desarrollo con datos y feedback de farmacia real
-Enfoque académico: Balance entre viabilidad comercial y factibilidad técnica
-
-Estado del Proyecto
-🟡 En Desarrollo - Proyecto Capstone académico con enfoque en propuesta de negocio
-Sprint Actual
-
-Análisis de mercado farmacéutico chileno
-Desarrollo de modelos financieros iniciales
-Setup de arquitectura básica para MVP
-
-Métricas de Éxito Académico
-
-Viabilidad financiera: VAN positivo en análisis conservador
-Factibilidad técnica: MVP funcional con datos reales
-Calidad de propuesta: Business plan presentable a inversionistas
-Gestión de proyectos: Cronograma y presupuesto detallados y realistas
-
-Limitaciones Reconocidas
-
-Alcance académico: 10 semanas para propuesta completa + MVP
-Validación limitada: Una farmacia piloto, no múltiples establecimientos
-Enfoque educativo: Prototipo funcional, no solución comercial lista
-
-Contribuciones
-
-Fork el repositorio
-Crea una rama feature (git checkout -b feature/nueva-funcionalidad)
-Commit tus cambios (git commit -am 'Agrega nueva funcionalidad')
-Push a la rama (git push origin feature/nueva-funcionalidad)
-Abre un Pull Request
-
+Estado Actual
+En Desarrollo - Proyecto Capstone académico en fase de planificación
+Objetivo Académico
+Demostrar competencias integrales de Ingeniería en Informática mediante el desarrollo de una propuesta de negocio técnicamente viable y comercialmente fundamentada para el sector farmacéutico chileno.
 Licencia
-MIT License - ver LICENSE para detalles
+MIT License
 
-Proyecto Capstone Duoc UC 2025
-Propuesta de negocio para CRM especializado en farmacias con validación técnica mediante MVP funcional
-Contacto del Equipo:
-
-Enrique García (Líder): LinkedIn
-Daniel Acevedo (Validador): Administrador Farmacia
-Bastian Hartal (Desarrollador): Experiencia farmacéutica
-
-Documentación Adicional
-
-Plan de Proyecto APT
-Análisis de Mercado
-Arquitectura Técnica
-Guía de Contribución
+Duoc UC 2025 - Ingeniería en Informática
+Proyecto de Aplicación de Título (APT)
