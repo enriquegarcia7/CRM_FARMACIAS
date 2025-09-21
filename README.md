@@ -1,4 +1,4 @@
-# SmartPharm CRM - Sistema Especializado para Farmacias
+# CRM - Sistema Especializado para Farmacias
 
 **Proyecto Capstone Duoc UC - Sede Antonio Varas**  
 **Ingeniería en Informática 2025**
