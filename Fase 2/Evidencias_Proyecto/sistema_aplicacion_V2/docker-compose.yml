@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:15-alpine
+    container_name: smartpharm_db
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${DB_NAME:-smartpharm_db}
+      POSTGRES_USER: ${DB_USER:-smartpharm_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-123456}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - smartpharm_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartpharm_user -d smartpharm_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend Django
+  backend:
+    build:
+      context: ./Backend_Django
+      dockerfile: Dockerfile
+    container_name: smartpharm_backend
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             python manage.py shell -c \"from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.create_superuser('bhartal', 'bastianhartal@gmail.com', '123456') if not User.objects.filter(username='bhartal').exists() else print('Superuser bhartal already exists')\" &&
+             gunicorn --bind 0.0.0.0:8000 --workers 3 SmartPharm.wsgi:application"
+    volumes:
+      - ./Backend_Django:/app
+      - static_volume:/app/staticfiles
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - DB_NAME=smartpharm_db
+      - DB_USER=smartpharm_user
+      - DB_PASSWORD=123456
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - smartpharm_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend React
+  frontend:
+    build:
+      context: ./Frontend_React
+      dockerfile: Dockerfile
+    container_name: smartpharm_frontend
+    ports:
+      - "${FRONTEND_PORT:-80}:80"
+    depends_on:
+      - backend
+    networks:
+      - smartpharm_network
+    env_file:
+      - .env
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+
+volumes:
+  postgres_data:
+  static_volume:
+
+networks:
+  smartpharm_network:
+    driver: bridge

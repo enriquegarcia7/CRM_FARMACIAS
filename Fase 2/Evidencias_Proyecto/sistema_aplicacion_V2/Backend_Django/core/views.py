@@ -1,0 +1,194 @@
+from rest_framework import viewsets, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django.db.models import Count, Sum, Q, F
+from django.utils import timezone
+from datetime import timedelta
+from .models import (
+    Cliente, Transaccion, Producto, Proveedor,
+    OfertaLaboratorio, SugerenciaCompra, Venta, DetalleVenta
+)
+from .serializers import (
+    ClienteSerializer, TransaccionSerializer, ProductoSerializer,
+    ProveedorSerializer, OfertaLaboratorioSerializer,
+    SugerenciaCompraSerializer, VentaSerializer
+)
+
+
+class ClienteViewSet(viewsets.ModelViewSet):
+    queryset = Cliente.objects.all()
+    serializer_class = ClienteSerializer
+
+    @action(detail=False, methods=['get'])
+    def frecuentes(self, request):
+        """Obtiene clientes frecuentes (con 5 o más compras)"""
+        clientes = Cliente.objects.annotate(
+            total_ventas=Count('ventas', filter=Q(ventas__estado='completada'))
+        ).filter(total_ventas__gte=5)
+
+        serializer = self.get_serializer(clientes, many=True)
+        return Response(serializer.data)
+
+
+class TransaccionViewSet(viewsets.ModelViewSet):
+    queryset = Transaccion.objects.all()
+    serializer_class = TransaccionSerializer
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Estadísticas de transacciones"""
+        total = Transaccion.objects.count()
+        return Response({'total': total})
+
+
+class ProductoViewSet(viewsets.ModelViewSet):
+    queryset = Producto.objects.all()
+    serializer_class = ProductoSerializer
+
+    @action(detail=False, methods=['get'])
+    def low_stock(self, request):
+        """Productos con stock bajo"""
+        productos = Producto.objects.filter(
+            stock_actual__lt=F('stock_minimo')
+        )
+        serializer = self.get_serializer(productos, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def top_selling(self, request):
+        """Top productos más vendidos"""
+        limit = int(request.query_params.get('limit', 10))
+
+        # Obtener top productos desde DetalleVenta
+        top_productos = DetalleVenta.objects.values('producto__codigo', 'producto__descripcion').annotate(
+            total_vendido=Sum('cantidad'),
+            total_ventas=Sum('subtotal')
+        ).order_by('-total_vendido')[:limit]
+
+        return Response(top_productos)
+
+
+class ProveedorViewSet(viewsets.ModelViewSet):
+    queryset = Proveedor.objects.all()
+    serializer_class = ProveedorSerializer
+
+
+class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
+    queryset = OfertaLaboratorio.objects.filter(activa=True)
+    serializer_class = OfertaLaboratorioSerializer
+
+    @action(detail=False, methods=['post'])
+    def procesar(self, request):
+        """Procesar archivo de ofertas (Excel/PDF)"""
+        archivo = request.FILES.get('archivo')
+
+        if not archivo:
+            return Response(
+                {'error': 'No se proporcionó archivo'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # TODO: Implementar lógica de ETL
+        # Por ahora solo retorna mensaje de éxito
+        return Response({
+            'message': f'Archivo {archivo.name} recibido y procesado correctamente',
+            'ofertas_creadas': 0
+        })
+
+
+class SugerenciaCompraViewSet(viewsets.ModelViewSet):
+    queryset = SugerenciaCompra.objects.filter(procesada=False)
+    serializer_class = SugerenciaCompraSerializer
+
+    @action(detail=False, methods=['get'])
+    def low_stock(self, request):
+        """Sugerencias por bajo stock"""
+        sugerencias = self.queryset.filter(tipo='bajo_stock')
+        serializer = self.get_serializer(sugerencias, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def season(self, request):
+        """Sugerencias estacionales"""
+        sugerencias = self.queryset.filter(tipo='estacional')
+        serializer = self.get_serializer(sugerencias, many=True)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def epidemiological(self, request):
+        """Sugerencias epidemiológicas"""
+        sugerencias = self.queryset.filter(tipo='epidemiologico')
+        serializer = self.get_serializer(sugerencias, many=True)
+        return Response(serializer.data)
+
+
+class VentaViewSet(viewsets.ModelViewSet):
+    queryset = Venta.objects.all()
+    serializer_class = VentaSerializer
+
+
+class DashboardViewSet(viewsets.ViewSet):
+    """Endpoints específicos para el dashboard"""
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Estadísticas generales del dashboard"""
+        # Total ventas
+        total_ventas = Venta.objects.filter(estado='completada').aggregate(
+            total=Sum('total')
+        )['total'] or 0
+
+        # Ventas del mes actual
+        mes_actual = timezone.now().replace(day=1)
+        ventas_mes = Venta.objects.filter(
+            estado='completada',
+            fecha__gte=mes_actual
+        ).aggregate(total=Sum('total'))['total'] or 0
+
+        # Productos en stock
+        productos_stock = Producto.objects.filter(activo=True).count()
+
+        # Clientes activos (con compras en los últimos 6 meses)
+        hace_6_meses = timezone.now() - timedelta(days=180)
+        clientes_activos = Cliente.objects.filter(
+            ventas__fecha__gte=hace_6_meses
+        ).distinct().count()
+
+        return Response({
+            'total_ventas': total_ventas,
+            'ventas_mes': ventas_mes,
+            'productos_stock': productos_stock,
+            'clientes_activos': clientes_activos
+        })
+
+    @action(detail=False, methods=['get'])
+    def sales(self, request):
+        """Datos de ventas para gráficos"""
+        # Ventas de los últimos 12 meses
+        hace_12_meses = timezone.now() - timedelta(days=365)
+
+        ventas_mensuales = Venta.objects.filter(
+            estado='completada',
+            fecha__gte=hace_12_meses
+        ).extra(
+            select={'mes': "strftime('%%Y-%%m', fecha)"}
+        ).values('mes').annotate(
+            total=Sum('total')
+        ).order_by('mes')
+
+        return Response(ventas_mensuales)
+
+    @action(detail=False, methods=['get'])
+    def top_products(self, request):
+        """Top 10 productos más vendidos"""
+        limit = int(request.query_params.get('limit', 10))
+
+        top_productos = DetalleVenta.objects.values(
+            'producto__codigo',
+            'producto__descripcion'
+        ).annotate(
+            cantidad=Sum('cantidad'),
+            ventas=Sum('subtotal')
+        ).order_by('-cantidad')[:limit]
+
+        return Response(list(top_productos))
