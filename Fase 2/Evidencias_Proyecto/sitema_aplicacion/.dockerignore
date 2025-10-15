@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Database
+*.sqlite3
+db.sqlite3
+
+# Environment
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+smartpharm-frontend/node_modules/
+smartpharm-frontend/dist/
+smartpharm-frontend/.vite/
+
+# Docker
+docker-compose.override.yml
+
+# Static and Media (se manejan con volúmenes)
+staticfiles/
+media/
+
+# Tests
+.coverage
+htmlcov/
+.pytest_cache/
