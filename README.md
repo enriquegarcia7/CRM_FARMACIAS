@@ -1,4 +1,4 @@
-markdown# 🏥 SmartPharm CRM
+🏥 SmartPharm CRM
 
 **Sistema de Gestión Especializado para Farmacias Pequeñas en Chile**
 
