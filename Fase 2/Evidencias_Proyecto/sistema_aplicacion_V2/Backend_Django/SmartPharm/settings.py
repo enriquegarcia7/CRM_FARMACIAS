@@ -57,7 +57,7 @@ DATABASES = {
         'NAME': config('DB_NAME', default='smartpharm_db'),
         'USER': config('DB_USER', default='smartpharm_user'),
         'PASSWORD': config('DB_PASSWORD', default='123456'),
-        'HOST': config('DB_HOST', default='172.25.247.134'),
+        'HOST': config('DB_HOST', default='db'),
         'PORT': config('DB_PORT', default='5432'),
     }
 }
