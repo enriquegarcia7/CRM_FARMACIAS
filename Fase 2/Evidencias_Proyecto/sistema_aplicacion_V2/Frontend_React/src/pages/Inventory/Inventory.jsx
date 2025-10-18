@@ -8,6 +8,7 @@ const Inventory = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filtroStock, setFiltroStock] = useState('todos'); // todos, bajo, normal
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     cargarProductos();
@@ -20,28 +21,26 @@ const Inventory = () => {
   const cargarProductos = async () => {
     try {
       setLoading(true);
-      // Datos simulados - reemplazar con llamada API real
-      const datosSimulados = [
-        { id: 1, codigo: 'MED-001', descripcion: 'Paracetamol 500mg', stock: 850, stockMinimo: 200, categoria: 'Analgésico' },
-        { id: 2, codigo: 'MED-002', descripcion: 'Ibuprofeno 400mg', stock: 720, stockMinimo: 150, categoria: 'Antiinflamatorio' },
-        { id: 3, codigo: 'MED-003', descripcion: 'Amoxicilina 500mg', stock: 45, stockMinimo: 100, categoria: 'Antibiótico' },
-        { id: 4, codigo: 'MED-004', descripcion: 'Loratadina 10mg', stock: 580, stockMinimo: 100, categoria: 'Antihistamínico' },
-        { id: 5, codigo: 'MED-005', descripcion: 'Omeprazol 20mg', stock: 520, stockMinimo: 150, categoria: 'Gastroprotector' },
-        { id: 6, codigo: 'MED-006', descripcion: 'Atorvastatina 20mg', stock: 35, stockMinimo: 80, categoria: 'Hipolipemiante' },
-        { id: 7, codigo: 'MED-007', descripcion: 'Metformina 850mg', stock: 450, stockMinimo: 120, categoria: 'Antidiabético' },
-        { id: 8, codigo: 'MED-008', descripcion: 'Losartán 50mg', stock: 420, stockMinimo: 100, categoria: 'Antihipertensivo' },
-        { id: 9, codigo: 'MED-009', descripcion: 'Clonazepam 0.5mg', stock: 25, stockMinimo: 50, categoria: 'Ansiolítico' },
-        { id: 10, codigo: 'MED-010', descripcion: 'Enalapril 10mg', stock: 350, stockMinimo: 80, categoria: 'Antihipertensivo' },
-        { id: 11, codigo: 'MED-011', descripcion: 'Levotiroxina 100mcg', stock: 280, stockMinimo: 100, categoria: 'Hormona tiroidea' },
-        { id: 12, codigo: 'MED-012', descripcion: 'Salbutamol Inhalador', stock: 15, stockMinimo: 40, categoria: 'Broncodilatador' },
-        { id: 13, codigo: 'MED-013', descripcion: 'Diclofenaco 50mg', stock: 380, stockMinimo: 100, categoria: 'Antiinflamatorio' },
-        { id: 14, codigo: 'MED-014', descripcion: 'Ranitidina 150mg', stock: 420, stockMinimo: 120, categoria: 'Gastroprotector' },
-        { id: 15, codigo: 'MED-015', descripcion: 'Aspirina 100mg', stock: 650, stockMinimo: 150, categoria: 'Antiagregante' },
-      ];
-      setProductos(datosSimulados);
-      setLoading(false);
+      setError(null);
+
+      // Consumir API real del backend
+      const response = await productosService.getAll();
+
+      // Mapear datos del backend al formato esperado por el frontend
+      const productosFormateados = response.data.map(producto => ({
+        id: producto.id,
+        codigo: producto.codigo,
+        descripcion: producto.descripcion || producto.nombre,
+        stock: producto.stock_actual,
+        stockMinimo: producto.stock_minimo,
+        categoria: producto.categoria
+      }));
+
+      setProductos(productosFormateados);
     } catch (error) {
       console.error('Error cargando productos:', error);
+      setError(error.response?.data?.message || error.message || 'Error al cargar inventario');
+    } finally {
       setLoading(false);
     }
   };
@@ -81,7 +80,30 @@ const Inventory = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-xl">Cargando inventario...</div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <span className="ml-4 text-xl text-gray-600">Cargando inventario...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-8 max-w-md">
+          <div className="flex items-center mb-4">
+            <svg className="w-8 h-8 text-red-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 className="text-lg font-semibold text-red-800">Error al cargar inventario</h3>
+          </div>
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={cargarProductos}
+            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+          >
+            Reintentar
+          </button>
+        </div>
       </div>
     );
   }
