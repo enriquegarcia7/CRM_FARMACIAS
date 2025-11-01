@@ -10,28 +10,28 @@ from google.oauth2.credentials import Credentials
 import os
 import logging
 import json
+from config.secrets import (
+    ensure_credentials_file_exists,
+    get_gmail_token_path,
+    get_credentials_file_path
+)
 
 logger = logging.getLogger(__name__)
 
 # Configuración OAuth
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
-TOKEN_PATH = os.path.join(settings.BASE_DIR, 'gmail_token.json')
-CREDENTIALS_PATH = os.path.join(settings.BASE_DIR, 'gmail_credentials.json')
 
 # URL de callback - debe coincidir con la configurada en Google Cloud Console
 REDIRECT_URI = os.getenv('GMAIL_REDIRECT_URI', 'http://localhost:8000/api/gmail/callback')
 
 
 def get_flow():
-    """Crea y retorna un Flow de OAuth"""
-    if not os.path.exists(CREDENTIALS_PATH):
-        raise FileNotFoundError(
-            "No se encontró gmail_credentials.json. "
-            "Por favor configura la API de Gmail siguiendo las instrucciones en ETL_SETUP_INSTRUCTIONS.md"
-        )
+    """Crea y retorna un Flow de OAuth usando credenciales desde config.secrets"""
+    # Asegurar que el archivo de credenciales existe (lo crea desde Base64 si no existe)
+    credentials_path = ensure_credentials_file_exists(settings.BASE_DIR)
 
     flow = Flow.from_client_secrets_file(
-        CREDENTIALS_PATH,
+        credentials_path,
         scopes=SCOPES,
         redirect_uri=REDIRECT_URI
     )
@@ -46,9 +46,11 @@ def check_gmail_auth(request):
     GET /api/gmail/auth/status/
     """
     try:
+        token_path = get_gmail_token_path(settings.BASE_DIR)
+
         # Verificar si existe el token
-        if os.path.exists(TOKEN_PATH):
-            creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+        if os.path.exists(token_path):
+            creds = Credentials.from_authorized_user_file(token_path, SCOPES)
 
             # Verificar si el token es válido
             if creds and creds.valid:
@@ -246,7 +248,8 @@ def gmail_auth_callback(request):
         creds = flow.credentials
 
         # Guardar token en archivo
-        with open(TOKEN_PATH, 'w') as token:
+        token_path = get_gmail_token_path(settings.BASE_DIR)
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
 
         logger.info("✅ Gmail autenticado exitosamente")
@@ -410,8 +413,9 @@ def revoke_gmail_auth(request):
     DELETE /api/gmail/auth/revoke/
     """
     try:
-        if os.path.exists(TOKEN_PATH):
-            os.remove(TOKEN_PATH)
+        token_path = get_gmail_token_path(settings.BASE_DIR)
+        if os.path.exists(token_path):
+            os.remove(token_path)
             logger.info("🗑️ Gmail token revocado")
             return Response({
                 'success': True,

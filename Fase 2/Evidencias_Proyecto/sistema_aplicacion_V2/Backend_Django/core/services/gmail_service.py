@@ -7,6 +7,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from django.conf import settings
 import logging
+from config.secrets import get_gmail_token_path
 
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -38,7 +39,7 @@ class GmailService:
         Si no existe token o no es válido, lanza una excepción.
         El usuario debe autenticarse primero usando el flujo web OAuth.
         """
-        token_path = os.path.join(settings.BASE_DIR, 'gmail_token.json')
+        token_path = get_gmail_token_path(settings.BASE_DIR)
 
         # Verificar si existe el token
         if not os.path.exists(token_path):

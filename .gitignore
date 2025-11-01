@@ -1,10 +1,8 @@
-# Archivos sensibles - Tokens y Credenciales
+# Archivos temporales del ETL y credenciales (generados en tiempo de ejecución)
+**/etl_progress.json
 **/gmail_token.json
 **/user_session_token.json
 **/gmail_credentials.json
-
-# Archivos temporales del ETL
-**/etl_progress.json
 
 # Python
 __pycache__/
@@ -41,5 +39,5 @@ yarn-error.log
 Thumbs.db
 nul
 
-# Otros
+# Documentos temporales
 claude web.md

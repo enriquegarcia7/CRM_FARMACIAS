@@ -9,6 +9,11 @@ from google.oauth2.credentials import Credentials
 import os
 import logging
 import json
+from config.secrets import (
+    ensure_credentials_file_exists,
+    get_gmail_token_path,
+    get_user_session_token_path
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,24 +24,18 @@ SCOPES = [
     'https://www.googleapis.com/auth/userinfo.profile',
     'https://www.googleapis.com/auth/gmail.readonly'  # Incluye Gmail automáticamente
 ]
-TOKEN_PATH = os.path.join(settings.BASE_DIR, 'gmail_token.json')
-CREDENTIALS_PATH = os.path.join(settings.BASE_DIR, 'gmail_credentials.json')
-USER_SESSION_TOKEN_PATH = os.path.join(settings.BASE_DIR, 'user_session_token.json')
 
 # URL de callback para login
 REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:8000/api/auth/callback')
 
 
 def get_flow():
-    """Crea Flow de OAuth con scopes de usuario y Gmail"""
-    if not os.path.exists(CREDENTIALS_PATH):
-        raise FileNotFoundError(
-            "No se encontró gmail_credentials.json. "
-            "Configure las credenciales de Google Cloud"
-        )
+    """Crea Flow de OAuth con scopes de usuario y Gmail usando credenciales desde config.secrets"""
+    # Asegurar que el archivo de credenciales existe (lo crea desde Base64 si no existe)
+    credentials_path = ensure_credentials_file_exists(settings.BASE_DIR)
 
     flow = Flow.from_client_secrets_file(
-        CREDENTIALS_PATH,
+        credentials_path,
         scopes=SCOPES,
         redirect_uri=REDIRECT_URI
     )
@@ -188,7 +187,8 @@ def login_callback(request):
         creds = flow.credentials
 
         # Guardar token de Gmail
-        with open(TOKEN_PATH, 'w') as token:
+        token_path = get_gmail_token_path(settings.BASE_DIR)
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
 
         # Obtener info del usuario
@@ -205,7 +205,8 @@ def login_callback(request):
             'logged_in': True
         }
 
-        with open(USER_SESSION_TOKEN_PATH, 'w') as session_file:
+        user_session_path = get_user_session_token_path(settings.BASE_DIR)
+        with open(user_session_path, 'w') as session_file:
             json.dump(user_session, session_file)
 
         logger.info(f"✅ Usuario logueado: {user_info.get('email')} (Gmail autorizado automáticamente)")
@@ -361,12 +362,14 @@ def check_session(request):
     GET /api/auth/session/
     """
     try:
-        if os.path.exists(USER_SESSION_TOKEN_PATH):
-            with open(USER_SESSION_TOKEN_PATH, 'r') as session_file:
+        user_session_path = get_user_session_token_path(settings.BASE_DIR)
+        if os.path.exists(user_session_path):
+            with open(user_session_path, 'r') as session_file:
                 user_session = json.load(session_file)
 
             # Verificar también que el token de Gmail exista
-            gmail_authenticated = os.path.exists(TOKEN_PATH)
+            token_path = get_gmail_token_path(settings.BASE_DIR)
+            gmail_authenticated = os.path.exists(token_path)
 
             return Response({
                 'logged_in': True,
@@ -402,13 +405,15 @@ def logout(request):
     """
     try:
         # Eliminar token de sesión de usuario
-        if os.path.exists(USER_SESSION_TOKEN_PATH):
-            os.remove(USER_SESSION_TOKEN_PATH)
+        user_session_path = get_user_session_token_path(settings.BASE_DIR)
+        if os.path.exists(user_session_path):
+            os.remove(user_session_path)
             logger.info("🗑️ User session removed")
 
         # Eliminar token de Gmail (forzará nueva autorización)
-        if os.path.exists(TOKEN_PATH):
-            os.remove(TOKEN_PATH)
+        token_path = get_gmail_token_path(settings.BASE_DIR)
+        if os.path.exists(token_path):
+            os.remove(token_path)
             logger.info("🗑️ Gmail token removed")
 
         return Response({
