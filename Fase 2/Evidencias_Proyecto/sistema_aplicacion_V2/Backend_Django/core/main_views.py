@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Count, Sum, Q, F
+from django.db.models.functions import TruncMonth, TruncDate
 from django.utils import timezone
 from datetime import timedelta
 from .models import (
@@ -127,8 +128,10 @@ class VentaViewSet(viewsets.ModelViewSet):
     serializer_class = VentaSerializer
 
 
-class DashboardViewSet(viewsets.ViewSet):
+class DashboardViewSet(viewsets.GenericViewSet):
     """Endpoints específicos para el dashboard"""
+    # Queryset vacío para que el router funcione correctamente
+    queryset = Venta.objects.none()
 
     @action(detail=False, methods=['get'])
     def stats(self, request):
@@ -167,18 +170,27 @@ class DashboardViewSet(viewsets.ViewSet):
         # Ventas de los últimos 12 meses
         hace_12_meses = timezone.now() - timedelta(days=365)
 
+        # Usar TruncMonth para PostgreSQL (compatible con todas las BD)
         ventas_mensuales = Venta.objects.filter(
             estado='completada',
             fecha__gte=hace_12_meses
-        ).extra(
-            select={'mes': "strftime('%%Y-%%m', fecha)"}
+        ).annotate(
+            mes=TruncMonth('fecha')
         ).values('mes').annotate(
             total=Sum('total')
         ).order_by('mes')
 
-        return Response(ventas_mensuales)
+        # Formatear la respuesta
+        result = []
+        for venta in ventas_mensuales:
+            result.append({
+                'mes': venta['mes'].strftime('%Y-%m') if venta['mes'] else None,
+                'total': float(venta['total']) if venta['total'] else 0
+            })
 
-    @action(detail=False, methods=['get'])
+        return Response(result)
+
+    @action(detail=False, methods=['get'], url_path='top-products')
     def top_products(self, request):
         """Top 10 productos más vendidos"""
         limit = int(request.query_params.get('limit', 10))

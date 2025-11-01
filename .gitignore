@@ -1,0 +1,45 @@
+# Archivos sensibles - Tokens y Credenciales
+**/gmail_token.json
+**/user_session_token.json
+**/gmail_credentials.json
+
+# Archivos temporales del ETL
+**/etl_progress.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Django
+*.log
+db.sqlite3
+media/
+
+# Node/React
+node_modules/
+npm-debug.log
+yarn-error.log
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Otros
+claude web.md

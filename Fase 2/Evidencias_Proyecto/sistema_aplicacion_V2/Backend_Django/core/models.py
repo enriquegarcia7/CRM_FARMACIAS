@@ -30,12 +30,15 @@ class Transaccion(models.Model):
 
 class Producto(models.Model):
     codigo = models.CharField(max_length=50, unique=True)
-    descripcion = models.CharField(max_length=200)
+    nombre = models.CharField(max_length=200)
+    descripcion = models.CharField(max_length=200, blank=True)
     categoria = models.CharField(max_length=100)
     stock_actual = models.IntegerField(default=0)
     stock_minimo = models.IntegerField(default=0)
-    precio_venta = models.DecimalField(max_digits=10, decimal_places=2)
-    precio_costo = models.DecimalField(max_digits=10, decimal_places=2)
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    precio_venta = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    precio_costo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    proveedor = models.ForeignKey('Proveedor', on_delete=models.SET_NULL, null=True, blank=True, related_name='productos')
     activo = models.BooleanField(default=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
 
@@ -43,7 +46,7 @@ class Producto(models.Model):
         verbose_name_plural = "Productos"
 
     def __str__(self):
-        return f"{self.codigo} - {self.descripcion}"
+        return f"{self.codigo} - {self.nombre}"
 
     @property
     def bajo_stock(self):
@@ -52,9 +55,10 @@ class Producto(models.Model):
 
 class Proveedor(models.Model):
     nombre = models.CharField(max_length=150)
-    rut = models.CharField(max_length=12, unique=True)
+    rut = models.CharField(max_length=12, unique=True, null=True, blank=True)
     contacto = models.CharField(max_length=100, blank=True)
     telefono = models.CharField(max_length=20, blank=True)
+    email = models.EmailField(blank=True)
     correo = models.EmailField(blank=True)
     direccion = models.TextField(blank=True)
     activo = models.BooleanField(default=True)
@@ -67,26 +71,47 @@ class Proveedor(models.Model):
 
 
 class OfertaLaboratorio(models.Model):
-    proveedor = models.ForeignKey(Proveedor, on_delete=models.CASCADE, related_name='ofertas')
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='ofertas')
+    laboratorio = models.CharField(max_length=200)
     precio_normal = models.DecimalField(max_digits=10, decimal_places=2)
     precio_oferta = models.DecimalField(max_digits=10, decimal_places=2)
-    descuento_porcentaje = models.DecimalField(max_digits=5, decimal_places=2)
-    fecha_vigencia = models.DateField()
-    fecha_carga = models.DateTimeField(auto_now_add=True)
-    archivo_origen = models.CharField(max_length=255, blank=True)
+    descuento = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField()
     activa = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        db_table = 'ofertas_laboratorio'
         verbose_name_plural = "Ofertas de Laboratorios"
-        ordering = ['-fecha_vigencia']
+        ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.proveedor.nombre} - {self.producto.descripcion} ({self.descuento_porcentaje}% OFF)"
+        return f"{self.laboratorio} - {self.producto.codigo}"
 
     @property
     def ahorro(self):
         return self.precio_normal - self.precio_oferta
+
+
+class ETLLog(models.Model):
+    fecha_ejecucion = models.DateTimeField(auto_now_add=True)
+    emails_procesados = models.IntegerField(default=0)
+    adjuntos_descargados = models.IntegerField(default=0)
+    ofertas_extraidas = models.IntegerField(default=0)
+    ofertas_insertadas = models.IntegerField(default=0)
+    ofertas_actualizadas = models.IntegerField(default=0)
+    errores = models.TextField(blank=True)
+    duracion_segundos = models.FloatField(default=0)
+    exitoso = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'etl_logs'
+        verbose_name_plural = "ETL Logs"
+        ordering = ['-fecha_ejecucion']
+
+    def __str__(self):
+        return f"ETL {self.fecha_ejecucion.strftime('%Y-%m-%d %H:%M')}"
 
 
 class SugerenciaCompra(models.Model):

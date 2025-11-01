@@ -69,4 +69,29 @@ export const ofertasService = {
   }),
 };
 
+// Servicios para ETL
+export const etlService = {
+  runManual: (daysBack = 5, strictMode = false) => api.post('/etl/run/', {
+    days_back: daysBack,
+    strict_mode: strictMode
+  }),
+  getLogs: () => api.get('/etl/logs/'),
+  getStatus: () => api.get('/etl/status/'),
+  getProgress: () => api.get('/etl/progress/')
+};
+
+// Servicios para Gmail OAuth
+export const gmailAuthService = {
+  checkStatus: () => api.get('/gmail/auth/status/'),
+  startAuth: () => api.get('/gmail/auth/start/'),
+  revokeAuth: () => api.delete('/gmail/auth/revoke/')
+};
+
+// Servicios para Autenticación de Usuario (Login con Google)
+export const authService = {
+  startLogin: () => api.get('/auth/login/start/'),
+  checkSession: () => api.get('/auth/session/'),
+  logout: () => api.post('/auth/logout/')
+};
+
 export default api;
