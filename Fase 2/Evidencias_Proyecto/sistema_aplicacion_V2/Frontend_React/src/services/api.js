@@ -38,12 +38,27 @@ export const transaccionesService = {
   getStats: () => api.get('/transacciones/stats/'), // Endpoint a crear
 };
 
-// Servicios para Productos (a implementar en backend)
+// Servicios para Productos
 export const productosService = {
-  getAll: () => api.get('/productos/'),
+  getAll: (params = {}) => {
+    // params: { page, page_size, search, filtro_stock }
+    const queryParams = new URLSearchParams();
+
+    if (params.page) queryParams.append('page', params.page);
+    if (params.page_size) queryParams.append('page_size', params.page_size);
+    if (params.search) queryParams.append('search', params.search);
+    if (params.filtro_stock) queryParams.append('filtro_stock', params.filtro_stock);
+
+    const queryString = queryParams.toString();
+    return api.get(`/productos/${queryString ? `?${queryString}` : ''}`);
+  },
   getById: (id) => api.get(`/productos/${id}/`),
   getLowStock: () => api.get('/productos/low-stock/'),
   getTopSelling: (limit = 10) => api.get(`/productos/top-selling/?limit=${limit}`),
+  getUltimaCarga: () => api.get('/productos/ultima-carga/'),
+  cargarExcel: (formData) => api.post('/productos/cargar_excel/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
 };
 
 // Servicios para Dashboard

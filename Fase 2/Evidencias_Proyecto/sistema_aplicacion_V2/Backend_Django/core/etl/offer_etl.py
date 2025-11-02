@@ -57,18 +57,13 @@ class OfferETL:
             # Crear registro ETL antes de procesar (para vincular archivos)
             self.etl_log = ETLLog.objects.create(exitoso=False)
 
-            # Eliminar solo las ofertas vencidas, mantener las vigentes
-            self._update_progress(5, 'limpiando', 'Eliminando ofertas vencidas...')
-            today = timezone.now().date()
-
-            vencidas = OfertaLaboratorio.objects.filter(fecha_fin__lt=today)
-            deleted_count = vencidas.count()
-            vencidas.delete()
-
-            vigentes_count = OfertaLaboratorio.objects.filter(fecha_fin__gte=today).count()
-
-            logger.info(f"🗑️ Eliminadas {deleted_count} ofertas vencidas")
-            logger.info(f"✓ Mantenidas {vigentes_count} ofertas vigentes")
+            # Nota: Ya NO eliminamos ofertas al inicio
+            # La lógica inteligente de _load_offers() se encarga de:
+            # - Mantener ofertas vigentes si no hay mejores
+            # - Reemplazar ofertas vencidas siempre
+            # - Reemplazar ofertas vigentes solo si la nueva es mejor
+            self._update_progress(5, 'preparando', 'Preparando proceso ETL...')
+            logger.info("📋 Usando lógica inteligente de actualización (mantener vigentes, reemplazar si hay mejoras)")
 
             # Conectar a Gmail
             self._update_progress(10, 'conectando', 'Conectando a Gmail...')
@@ -235,36 +230,121 @@ class OfferETL:
 
     @transaction.atomic
     def _load_offers(self, offers):
+        """
+        Carga ofertas con lógica inteligente anti-duplicados:
+
+        Para cada nueva oferta:
+        1. Buscar oferta existente del mismo producto (código + laboratorio)
+        2. Si existe y está VIGENTE (fecha_fin >= hoy):
+           - Comparar precio y descuento
+           - SOLO reemplazar si la nueva es mejor (precio < o descuento >)
+        3. Si existe pero está VENCIDA (fecha_fin < hoy):
+           - Reemplazar siempre
+        4. Si NO existe:
+           - Insertar directamente
+        """
+        today = timezone.now().date()
+
         for offer_data in offers:
             try:
+                # Obtener o crear PROVEEDOR (quien envía el archivo: Mediven, Socofar, etc.)
                 proveedor, _ = Proveedor.objects.get_or_create(
-                    nombre=offer_data['laboratorio'],
+                    nombre=offer_data.get('proveedor', 'Proveedor Desconocido'),
                     defaults={
-                        'email': f"{offer_data['laboratorio'].lower().replace(' ', '')}@lab.cl",
+                        'email': f"{offer_data.get('proveedor', 'proveedor').lower().replace(' ', '')}@proveedor.cl",
                         'telefono': '+56900000000',
                         'direccion': 'Por confirmar'
                     }
                 )
 
+                # Obtener o crear producto
                 producto = self._get_or_create_producto(offer_data, proveedor)
 
-                # Crear nueva oferta (ya borramos todas las antiguas al inicio)
-                oferta = OfertaLaboratorio.objects.create(
+                # Buscar oferta existente del mismo producto + laboratorio
+                oferta_existente = OfertaLaboratorio.objects.filter(
                     producto=producto,
                     laboratorio=offer_data['laboratorio'],
-                    precio_normal=offer_data['precio_normal'],
-                    precio_oferta=offer_data['precio_oferta'],
-                    descuento=offer_data['descuento'],
-                    fecha_inicio=offer_data['fecha_inicio'],
-                    fecha_fin=offer_data['fecha_fin'],
-                    activa=offer_data['activa'],
-                )
+                    activa=True
+                ).first()
 
-                self.stats['offers_inserted'] += 1
-                logger.info(f"✓ Created: {producto.nombre} - {offer_data['laboratorio']}")
+                # Precios de la nueva oferta
+                nuevo_precio = offer_data['precio_oferta'] if offer_data['precio_oferta'] > 0 else offer_data['precio_normal']
+                nuevo_descuento = offer_data['descuento']
+
+                if oferta_existente:
+                    # Verificar si la oferta existente está vigente
+                    esta_vigente = oferta_existente.fecha_fin >= today
+
+                    if esta_vigente:
+                        # Oferta VIGENTE: solo reemplazar si la nueva es mejor
+                        precio_existente = oferta_existente.precio_oferta if oferta_existente.precio_oferta > 0 else oferta_existente.precio_normal
+                        descuento_existente = oferta_existente.descuento
+
+                        # Comparar: ¿la nueva es mejor?
+                        precio_mejor = nuevo_precio < precio_existente
+                        descuento_mejor = nuevo_descuento > descuento_existente
+
+                        if precio_mejor or descuento_mejor:
+                            # La nueva oferta es mejor, reemplazar
+                            logger.info(f"🔄 Actualizando oferta vigente mejorada: {producto.nombre}")
+                            logger.info(f"   Antes: ${precio_existente} ({descuento_existente}% desc)")
+                            logger.info(f"   Ahora: ${nuevo_precio} ({nuevo_descuento}% desc)")
+
+                            # Eliminar la antigua
+                            oferta_existente.delete()
+
+                            # Crear la nueva
+                            OfertaLaboratorio.objects.create(
+                                producto=producto,
+                                laboratorio=offer_data.get('laboratorio', 'Sin Laboratorio'),  # Fabricante: 3M, Abbott, etc.
+                                precio_normal=offer_data['precio_normal'],
+                                precio_oferta=offer_data['precio_oferta'],
+                                descuento=offer_data['descuento'],
+                                fecha_inicio=offer_data['fecha_inicio'],
+                                fecha_fin=offer_data['fecha_fin'],
+                                activa=offer_data['activa'],
+                            )
+                            self.stats['offers_updated'] += 1
+                        else:
+                            # La oferta existente es mejor o igual, mantenerla
+                            logger.info(f"⏭️ Manteniendo oferta vigente existente (mejor precio): {producto.nombre}")
+                            # No hacer nada, skip
+                            continue
+
+                    else:
+                        # Oferta VENCIDA: reemplazar siempre
+                        logger.info(f"🔄 Reemplazando oferta vencida: {producto.nombre}")
+                        oferta_existente.delete()
+
+                        OfertaLaboratorio.objects.create(
+                            producto=producto,
+                            laboratorio=offer_data.get('laboratorio', 'Sin Laboratorio'),  # Fabricante: 3M, Abbott, etc.
+                            precio_normal=offer_data['precio_normal'],
+                            precio_oferta=offer_data['precio_oferta'],
+                            descuento=offer_data['descuento'],
+                            fecha_inicio=offer_data['fecha_inicio'],
+                            fecha_fin=offer_data['fecha_fin'],
+                            activa=offer_data['activa'],
+                        )
+                        self.stats['offers_updated'] += 1
+
+                else:
+                    # NO existe oferta: crear nueva
+                    OfertaLaboratorio.objects.create(
+                        producto=producto,
+                        laboratorio=offer_data.get('laboratorio', 'Sin Laboratorio'),  # Fabricante: 3M, Abbott, etc.
+                        precio_normal=offer_data['precio_normal'],
+                        precio_oferta=offer_data['precio_oferta'],
+                        descuento=offer_data['descuento'],
+                        fecha_inicio=offer_data['fecha_inicio'],
+                        fecha_fin=offer_data['fecha_fin'],
+                        activa=offer_data['activa'],
+                    )
+                    self.stats['offers_inserted'] += 1
+                    logger.info(f"✓ Nueva oferta: {producto.nombre} - Proveedor: {offer_data.get('proveedor')} - Lab: {offer_data.get('laboratorio')}")
 
             except Exception as e:
-                logger.error(f"Error inserting offer: {e}")
+                logger.error(f"Error procesando oferta: {e}", exc_info=True)
                 self.stats['errors'].append(f"Offer {offer_data.get('producto', 'Unknown')}: {str(e)}")
                 continue
 

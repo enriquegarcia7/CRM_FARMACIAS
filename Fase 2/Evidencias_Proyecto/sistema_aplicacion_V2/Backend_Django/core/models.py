@@ -39,6 +39,16 @@ class Producto(models.Model):
     precio_venta = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     precio_costo = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     proveedor = models.ForeignKey('Proveedor', on_delete=models.SET_NULL, null=True, blank=True, related_name='productos')
+    en_inventario_actual = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="Indica si el producto está en el último Excel de inventario cargado"
+    )
+    fecha_ultima_carga = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Fecha de la última vez que este producto fue incluido en una carga de Excel"
+    )
     activo = models.BooleanField(default=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
 
@@ -100,6 +110,86 @@ class OfertaLaboratorio(models.Model):
     @property
     def ahorro(self):
         return self.precio_normal - self.precio_oferta
+
+
+class ProductoProveedorMapping(models.Model):
+    """
+    Mapeo entre productos internos y códigos de proveedores.
+    Permite vincular el inventario interno con ofertas de diferentes proveedores.
+
+    Ejemplo:
+    - Producto interno: codigo="PARA-500", nombre="Paracetamol 500mg"
+    - Mapeo 1: codigo_proveedor="7891234567890", proveedor="Mediven"
+    - Mapeo 2: codigo_proveedor="SOC-PARA-500", proveedor="Socofar"
+    """
+    producto_interno = models.ForeignKey(
+        Producto,
+        on_delete=models.CASCADE,
+        related_name='mappings',
+        help_text="Producto del inventario interno"
+    )
+    codigo_proveedor = models.CharField(
+        max_length=100,
+        db_index=True,
+        help_text="Código del producto según el proveedor"
+    )
+    proveedor = models.ForeignKey(
+        Proveedor,
+        on_delete=models.CASCADE,
+        related_name='producto_mappings',
+        help_text="Proveedor que usa este código"
+    )
+    nombre_en_catalogo = models.CharField(
+        max_length=300,
+        blank=True,
+        help_text="Nombre del producto en el catálogo del proveedor"
+    )
+    activo = models.BooleanField(
+        default=True,
+        help_text="Si el mapeo está activo o fue descontinuado"
+    )
+    confianza = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=100.00,
+        help_text="Nivel de confianza del mapeo (0-100%). 100% = manual, < 100% = automático"
+    )
+    fecha_mapeo = models.DateTimeField(auto_now_add=True)
+    mapeado_por = models.CharField(
+        max_length=50,
+        default='manual',
+        help_text="Origen del mapeo: 'manual', 'automatico', 'ml'"
+    )
+    notas = models.TextField(
+        blank=True,
+        help_text="Notas sobre el mapeo"
+    )
+
+    class Meta:
+        db_table = 'producto_proveedor_mapping'
+        verbose_name = "Mapeo Producto-Proveedor"
+        verbose_name_plural = "Mapeos Producto-Proveedor"
+        ordering = ['-fecha_mapeo']
+        indexes = [
+            models.Index(fields=['codigo_proveedor', 'proveedor'], name='idx_codigo_prov'),
+            models.Index(fields=['producto_interno', 'activo'], name='idx_prod_int_act'),
+        ]
+        # Un código de proveedor específico solo puede mapear a UN producto interno
+        unique_together = [['codigo_proveedor', 'proveedor']]
+
+    def __str__(self):
+        return f"{self.producto_interno.codigo} ↔ {self.codigo_proveedor} ({self.proveedor.nombre})"
+
+    def get_ofertas_activas(self):
+        """Obtiene ofertas activas para este código de proveedor"""
+        from django.utils import timezone
+        today = timezone.now().date()
+
+        return OfertaLaboratorio.objects.filter(
+            producto__codigo=self.codigo_proveedor,
+            activa=True,
+            fecha_fin__gte=today
+        )
 
 
 class ETLLog(models.Model):

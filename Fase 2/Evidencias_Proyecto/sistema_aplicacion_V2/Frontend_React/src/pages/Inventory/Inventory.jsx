@@ -1,42 +1,65 @@
-import { useState, useEffect } from 'react';
-import { Search, AlertTriangle, Package, Filter } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Search, AlertTriangle, Package, Filter, Upload, X, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import { productosService } from '../../services/api';
 
 const Inventory = () => {
   const [productos, setProductos] = useState([]);
-  const [filteredProductos, setFilteredProductos] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filtroStock, setFiltroStock] = useState('todos'); // todos, bajo, normal
+  const [searchInput, setSearchInput] = useState(''); // Para debounce
+  const [filtroStock, setFiltroStock] = useState(''); // '', 'bajo', 'normal'
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [ultimaCarga, setUltimaCarga] = useState(null);
 
+  // Paginación backend
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const itemsPerPage = 50;
+
+  // Modal de carga Excel
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Cargar productos cuando cambian filtros o página
   useEffect(() => {
     cargarProductos();
-  }, []);
+    cargarUltimaCarga();
+  }, [currentPage, filtroStock, searchTerm]);
 
+  // Debounce para búsqueda (500ms)
   useEffect(() => {
-    filtrarProductos();
-  }, [searchTerm, filtroStock, productos]);
+    const timer = setTimeout(() => {
+      setSearchTerm(searchInput);
+      setCurrentPage(1);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const cargarProductos = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Consumir API real del backend
-      const response = await productosService.getAll();
+      const params = {
+        page: currentPage,
+        page_size: itemsPerPage
+      };
 
-      // Mapear datos del backend al formato esperado por el frontend
-      const productosFormateados = response.data.map(producto => ({
-        id: producto.id,
-        codigo: producto.codigo,
-        descripcion: producto.descripcion || producto.nombre,
-        stock: producto.stock_actual,
-        stockMinimo: producto.stock_minimo,
-        categoria: producto.categoria
-      }));
+      if (filtroStock) params.filtro_stock = filtroStock;
+      if (searchTerm) params.search = searchTerm;
 
-      setProductos(productosFormateados);
+      const response = await productosService.getAll(params);
+
+      setProductos(response.data.results || []);
+      setTotalItems(response.data.count || 0);
+      setTotalPages(Math.ceil((response.data.count || 0) / itemsPerPage));
+
     } catch (error) {
       console.error('Error cargando productos:', error);
       setError(error.response?.data?.message || error.message || 'Error al cargar inventario');
@@ -45,39 +68,122 @@ const Inventory = () => {
     }
   };
 
-  const filtrarProductos = () => {
-    let resultado = productos;
+  const cargarUltimaCarga = async () => {
+    try {
+      const response = await productosService.getUltimaCarga();
+      if (response.data.fecha_ultima_carga) {
+        setUltimaCarga(new Date(response.data.fecha_ultima_carga));
+      }
+    } catch (error) {
+      console.error('Error cargando fecha de última carga:', error);
+    }
+  };
 
-    // Filtrar por término de búsqueda
-    if (searchTerm) {
-      resultado = resultado.filter(
-        (p) =>
-          p.codigo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          p.descripcion.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          p.categoria.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+  const formatearFechaHora = (fecha) => {
+    if (!fecha) return 'No disponible';
+
+    const opciones = {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    };
+
+    return fecha.toLocaleString('es-CL', opciones);
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validar extensión
+      if (!file.name.match(/\.(xlsx|xls)$/i)) {
+        alert('Por favor selecciona un archivo Excel (.xlsx o .xls)');
+        return;
+      }
+      setUploadFile(file);
+      setUploadResult(null);
+      setShowConfirmation(true); // Mostrar confirmación
+    }
+  };
+
+  const handleUploadExcel = async () => {
+    if (!uploadFile) {
+      alert('Por favor selecciona un archivo');
+      return;
     }
 
-    // Filtrar por nivel de stock
-    if (filtroStock === 'bajo') {
-      resultado = resultado.filter((p) => p.stock < p.stockMinimo);
-    } else if (filtroStock === 'normal') {
-      resultado = resultado.filter((p) => p.stock >= p.stockMinimo);
-    }
+    try {
+      setUploading(true);
+      setUploadResult(null);
 
-    setFilteredProductos(resultado);
+      const formData = new FormData();
+      formData.append('archivo', uploadFile);
+
+      const response = await productosService.cargarExcel(formData);
+
+      setUploadResult({
+        success: true,
+        ...response.data
+      });
+
+      // Recargar productos y fecha de última carga después de cargar Excel
+      setTimeout(() => {
+        cargarProductos();
+        cargarUltimaCarga();
+      }, 1000);
+
+      // Auto-cerrar modal después de 3 segundos si fue exitoso
+      setTimeout(() => {
+        closeUploadModal();
+      }, 3000);
+
+    } catch (error) {
+      console.error('Error cargando Excel:', error);
+      setUploadResult({
+        success: false,
+        error: error.response?.data?.error || error.message || 'Error al cargar archivo'
+      });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const closeUploadModal = () => {
+    setShowUploadModal(false);
+    setUploadFile(null);
+    setUploadResult(null);
+    setShowConfirmation(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const getStockStatus = (producto) => {
-    const porcentaje = (producto.stock / producto.stockMinimo) * 100;
+    const porcentaje = producto.stock_minimo > 0 ? (producto.stock_actual / producto.stock_minimo) * 100 : 100;
     if (porcentaje < 50) return { color: 'text-red-600 bg-red-100', label: 'Crítico' };
     if (porcentaje < 100) return { color: 'text-yellow-600 bg-yellow-100', label: 'Bajo' };
     return { color: 'text-green-600 bg-green-100', label: 'Normal' };
   };
 
-  const productosBajoStock = productos.filter((p) => p.stock < p.stockMinimo).length;
+  const nextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+    }
+  };
 
-  if (loading) {
+  const prevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const indexOfFirstItem = (currentPage - 1) * itemsPerPage + 1;
+  const indexOfLastItem = Math.min(currentPage * itemsPerPage, totalItems);
+
+  if (loading && productos.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -112,54 +218,35 @@ const Inventory = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold text-gray-800">Inventario de Productos</h1>
-        {productosBajoStock > 0 && (
-          <div className="flex items-center bg-red-100 text-red-700 px-4 py-2 rounded-lg">
-            <AlertTriangle size={20} className="mr-2" />
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="flex items-center bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <Upload size={20} className="mr-2" />
+            Cargar Excel
+          </button>
+          <div className="flex items-center bg-blue-100 text-blue-700 px-4 py-2 rounded-lg">
+            <Package size={20} className="mr-2" />
             <span className="font-semibold">
-              {productosBajoStock} productos con bajo stock
+              {totalItems.toLocaleString('es-CL')} productos
             </span>
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Estadísticas rápidas */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
+      {/* Fecha de última actualización */}
+      {ultimaCarga && (
+        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-4 shadow-sm">
+          <div className="flex items-center">
+            <Clock size={20} className="text-indigo-600 mr-3" />
             <div>
-              <p className="text-gray-500 text-sm">Total Productos</p>
-              <p className="text-3xl font-bold mt-2">{productos.length}</p>
-            </div>
-            <Package size={40} className="text-blue-500" />
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-500 text-sm">Stock Normal</p>
-              <p className="text-3xl font-bold mt-2 text-green-600">
-                {productos.filter((p) => p.stock >= p.stockMinimo).length}
-              </p>
-            </div>
-            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-              <Package size={24} className="text-green-600" />
+              <p className="text-sm font-medium text-indigo-900">Última actualización de stock</p>
+              <p className="text-lg font-bold text-indigo-700">{formatearFechaHora(ultimaCarga)}</p>
             </div>
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-500 text-sm">Bajo Stock</p>
-              <p className="text-3xl font-bold mt-2 text-red-600">
-                {productosBajoStock}
-              </p>
-            </div>
-            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-              <AlertTriangle size={24} className="text-red-600" />
-            </div>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Filtros y búsqueda */}
       <div className="bg-white rounded-lg shadow p-6">
@@ -168,10 +255,10 @@ const Inventory = () => {
             <Search className="absolute left-3 top-3 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar por código, descripción o categoría..."
+              placeholder="Buscar por código, producto o principio activo..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -179,9 +266,12 @@ const Inventory = () => {
             <select
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={filtroStock}
-              onChange={(e) => setFiltroStock(e.target.value)}
+              onChange={(e) => {
+                setFiltroStock(e.target.value);
+                setCurrentPage(1);
+              }}
             >
-              <option value="todos">Todos los productos</option>
+              <option value="">Todos los productos</option>
               <option value="bajo">Bajo stock</option>
               <option value="normal">Stock normal</option>
             </select>
@@ -191,53 +281,59 @@ const Inventory = () => {
 
       {/* Tabla de productos */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
+        {loading && (
+          <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
                   Código
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Descripción
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Producto
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Categoría
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
+                  Principio Activo
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Stock Actual
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                  Stock
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Stock Mínimo
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
+                  Stock Mín.
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Estado
                 </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredProductos.map((producto) => {
+              {productos.map((producto) => {
                 const status = getStockStatus(producto);
                 return (
                   <tr key={producto.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                       {producto.codigo}
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      {producto.descripcion}
+                    <td className="px-4 py-3 text-sm text-gray-900">
+                      {producto.nombre || producto.descripcion}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                       {producto.categoria}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
-                      {producto.stock}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
+                      {producto.stock_actual}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {producto.stockMinimo}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                      {producto.stock_minimo}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${status.color}`}
+                        className={`px-2 py-1 rounded-full text-xs font-semibold ${status.color}`}
                       >
                         {status.label}
                       </span>
@@ -248,12 +344,225 @@ const Inventory = () => {
             </tbody>
           </table>
         </div>
-        {filteredProductos.length === 0 && (
+
+        {productos.length === 0 && !loading && (
           <div className="text-center py-12 text-gray-500">
             No se encontraron productos
           </div>
         )}
+
+        {/* Controles de paginación */}
+        {productos.length > 0 && (
+          <div className="bg-gray-50 px-4 py-3 flex items-center justify-between border-t border-gray-200">
+            <div className="flex-1 flex justify-between sm:hidden">
+              <button
+                onClick={prevPage}
+                disabled={currentPage === 1 || loading}
+                className={`relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${
+                  currentPage === 1 || loading
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                Anterior
+              </button>
+              <button
+                onClick={nextPage}
+                disabled={currentPage === totalPages || loading}
+                className={`ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md ${
+                  currentPage === totalPages || loading
+                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                Siguiente
+              </button>
+            </div>
+            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm text-gray-700">
+                  Mostrando <span className="font-medium">{indexOfFirstItem}</span> a{' '}
+                  <span className="font-medium">{indexOfLastItem}</span> de{' '}
+                  <span className="font-medium">{totalItems.toLocaleString('es-CL')}</span> resultados
+                </p>
+              </div>
+              <div>
+                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
+                  <button
+                    onClick={prevPage}
+                    disabled={currentPage === 1 || loading}
+                    className={`relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 text-sm font-medium ${
+                      currentPage === 1 || loading
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <span className="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700">
+                    Página {currentPage} de {totalPages}
+                  </span>
+                  <button
+                    onClick={nextPage}
+                    disabled={currentPage === totalPages || loading}
+                    className={`relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 text-sm font-medium ${
+                      currentPage === totalPages || loading
+                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        : 'bg-white text-gray-500 hover:bg-gray-50'
+                    }`}
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </button>
+                </nav>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Modal de carga de Excel */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-800">Cargar Excel de Inventario</h3>
+              <button
+                onClick={closeUploadModal}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Seleccionar archivo Excel (.xlsx, .xls)
+                </label>
+                <p className="text-xs text-gray-500 mb-2">
+                  Columnas requeridas: CODIGO, PRODUCTO, PREC UNITARIO, PREC UNIDADES, STOCK
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleFileSelect}
+                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+              </div>
+
+              {uploadFile && showConfirmation && !uploadResult && (
+                <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4">
+                  <h4 className="text-yellow-800 font-bold mb-3 flex items-center">
+                    <AlertTriangle size={20} className="mr-2" />
+                    Confirmar Carga de Inventario
+                  </h4>
+                  <div className="text-sm text-yellow-800 space-y-2">
+                    <p className="font-semibold">📁 Archivo: {uploadFile.name}</p>
+                    <p className="text-xs">Tamaño: {(uploadFile.size / 1024).toFixed(2)} KB</p>
+                    <div className="mt-3 p-3 bg-yellow-100 rounded border border-yellow-300">
+                      <p className="font-bold text-yellow-900 mb-2">⚠️ IMPORTANTE:</p>
+                      <ul className="text-xs space-y-1 list-disc list-inside">
+                        <li>Este archivo reemplazará el inventario actual</li>
+                        <li>Solo se mostrarán los productos incluidos en este Excel</li>
+                        <li>Los productos no incluidos quedarán ocultos del inventario</li>
+                        <li>Esta acción actualizará stocks y precios</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {uploadFile && !showConfirmation && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-sm text-blue-800">
+                    <strong>Archivo seleccionado:</strong> {uploadFile.name}
+                  </p>
+                  <p className="text-xs text-blue-600 mt-1">
+                    Tamaño: {(uploadFile.size / 1024).toFixed(2)} KB
+                  </p>
+                </div>
+              )}
+
+              {uploadResult && (
+                <div className={`border rounded-lg p-4 ${uploadResult.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                  {uploadResult.success ? (
+                    <>
+                      <p className="text-green-800 font-semibold mb-2">✅ {uploadResult.message}</p>
+                      <div className="text-sm text-green-700">
+                        <p>• Insertados: {uploadResult.productos_insertados}</p>
+                        <p>• Actualizados: {uploadResult.productos_actualizados}</p>
+                        {uploadResult.errores && uploadResult.errores.length > 0 && (
+                          <details className="mt-2">
+                            <summary className="cursor-pointer text-yellow-700">
+                              ⚠️ {uploadResult.errores.length} errores
+                            </summary>
+                            <ul className="mt-1 ml-4 text-xs">
+                              {uploadResult.errores.slice(0, 5).map((error, idx) => (
+                                <li key={idx}>• {error}</li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-red-800">❌ {uploadResult.error}</p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                {showConfirmation && !uploadResult ? (
+                  <>
+                    <button
+                      onClick={handleUploadExcel}
+                      disabled={uploading}
+                      className={`flex-1 flex items-center justify-center px-4 py-2 rounded-lg font-semibold ${
+                        uploading
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-green-600 text-white hover:bg-green-700'
+                      }`}
+                    >
+                      {uploading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                          Procesando...
+                        </>
+                      ) : (
+                        <>
+                          <Upload size={18} className="mr-2" />
+                          Confirmar y Cargar
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setUploadFile(null);
+                        setShowConfirmation(false);
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = '';
+                        }
+                      }}
+                      disabled={uploading}
+                      className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Cancelar
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={closeUploadModal}
+                    className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    Cerrar
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

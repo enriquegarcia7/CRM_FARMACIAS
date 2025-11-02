@@ -98,7 +98,7 @@ class ExcelOfferParser:
         self.offers = []
         self.fecha_email = None
         self.vigencia_global = None
-        self.laboratorio_global = None
+        self.proveedor_global = None  # Proveedor que envía el archivo (Mediven, Socofar, etc.)
 
     def _find_header_row(self, df_temp):
         """
@@ -173,6 +173,74 @@ class ExcelOfferParser:
         # Si no hay fecha del email, usar fecha actual
         return datetime.now().date()
 
+    def _extract_proveedor_from_email(self):
+        """
+        Extrae el nombre del PROVEEDOR desde el dominio del email.
+
+        IMPORTANTE: El PROVEEDOR es quien envía el correo (Mediven, Socofar, etc.)
+        NO confundir con LABORATORIO (fabricante del producto: 3M, Abbott, etc.)
+
+        Prioridad:
+        1. Buscar en archivo Excel (logo, nombre en encabezados)
+        2. Extraer del dominio del email (ej: @mediven.cl → Mediven)
+        3. Si el dominio es genérico (gmail.com), NO usar como proveedor
+
+        Returns:
+            str or None: Nombre del proveedor o None si es dominio genérico
+        """
+        sender = self.metadata.get('sender', '')
+
+        if not sender or '@' not in sender:
+            return None
+
+        try:
+            # Extraer dominio del email
+            # Formato puede ser: "Nombre <email@dominio.com>" o "email@dominio.com"
+            if '<' in sender and '>' in sender:
+                # Formato: "Nombre Apellido <email@dominio.com>"
+                email_part = sender.split('<')[1].split('>')[0].strip()
+            else:
+                email_part = sender.strip()
+
+            # Obtener dominio
+            domain = email_part.split('@')[1].lower()
+
+            # Lista de dominios genéricos que NO son proveedores
+            generic_domains = [
+                'gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com',
+                'live.com', 'icloud.com', 'aol.com', 'protonmail.com'
+            ]
+
+            # Si es dominio genérico, NO usar como proveedor
+            if domain in generic_domains:
+                logger.info(f"🔍 Dominio genérico detectado ({domain}), NO se usará como proveedor")
+                return None
+
+            # Extraer nombre del proveedor del dominio
+            # mediven.cl → Mediven
+            # socofar.com.cl → Socofar
+            domain_name = domain.split('.')[0]
+
+            # Diccionario de proveedores conocidos (para normalización)
+            known_providers = {
+                'mediven': 'Mediven',
+                'socofar': 'Socofar',
+                'labchile': 'LabChile',
+                'cofasa': 'Cofasa',
+                'drogueria': 'Droguería',
+                'farmacias': 'Farmacias'
+            }
+
+            # Normalizar nombre si está en el diccionario
+            proveedor = known_providers.get(domain_name.lower(), domain_name.title())
+
+            logger.info(f"🏢 Proveedor extraído del email: {proveedor} (de {sender})")
+            return proveedor
+
+        except Exception as e:
+            logger.warning(f"No se pudo extraer proveedor del email: {e}")
+            return None
+
     def _extract_vigencia_global(self, all_sheets_data):
         """
         Busca la vigencia en TODAS las hojas/páginas del documento.
@@ -240,46 +308,67 @@ class ExcelOfferParser:
         logger.warning(f"⚠️ Vigencia no encontrada, usando default: {default_vigencia} (30 días)")
         return default_vigencia
 
-    def _extract_laboratorio_global(self, all_sheets_data):
+    def _extract_proveedor_from_file(self, all_sheets_data):
         """
-        Extrae el nombre del laboratorio analizando:
+        Extrae el nombre del PROVEEDOR desde el archivo Excel/CSV.
+
+        IMPORTANTE: Busca el PROVEEDOR (Mediven, Socofar, etc.) que envía el archivo,
+        NO el laboratorio fabricante de los productos (3M, Abbott, etc.).
+
+        Busca en:
         1. Nombre del archivo (prioridad alta)
-        2. Contenido de las primeras filas de todas las hojas
-        3. Columna 'laboratorio' si existe
+        2. Primeras filas del documento (logos, encabezados, títulos)
+        3. Metadata del archivo
+
+        Returns:
+            str or None: Nombre del proveedor o None si no se encuentra
         """
         # Primero desde nombre de archivo
         filename_clean = self.filename.lower().replace('.xlsx', '').replace('.xls', '').replace('.csv', '').replace('.xlsm', '')
 
-        known_labs = {
-            'mediven': 'Mediven', 'socofar': 'Socofar', 'labchile': 'LabChile',
-            'lab chile': 'LabChile', 'cruz verde': 'Cruz Verde', 'salcobrand': 'Salcobrand',
-            'cofasa': 'Cofasa', 'farmacias ahumada': 'Farmacias Ahumada'
+        # Diccionario de proveedores conocidos (empresas que envían archivos de ofertas)
+        known_providers = {
+            'mediven': 'Mediven',
+            'socofar': 'Socofar',
+            'labchile': 'LabChile',
+            'lab chile': 'LabChile',
+            'cofasa': 'Cofasa',
+            'cruz verde': 'Cruz Verde',
+            'salcobrand': 'Salcobrand',
+            'farmacias ahumada': 'Farmacias Ahumada',
+            'drogueria': 'Droguería',
+            'farmacias': 'Farmacias'
         }
 
         # Buscar en nombre de archivo
-        for lab_key, lab_name in known_labs.items():
-            if lab_key in filename_clean:
-                logger.info(f"🏭 Laboratorio desde archivo: {lab_name}")
-                return lab_name
+        for prov_key, prov_name in known_providers.items():
+            if prov_key in filename_clean:
+                logger.info(f"🏢 Proveedor desde filename: {prov_name}")
+                return prov_name
 
-        # Buscar en contenido de las hojas
+        # Buscar en contenido de las primeras filas del archivo
         for df_temp in all_sheets_data:
             for idx in range(min(10, len(df_temp))):
                 row = df_temp.iloc[idx]
                 row_text = ' '.join([str(cell) for cell in row if pd.notna(cell)]).lower()
 
-                for lab_key, lab_name in known_labs.items():
-                    if lab_key in row_text:
-                        logger.info(f"🏭 Laboratorio desde contenido: {lab_name}")
-                        return lab_name
+                for prov_key, prov_name in known_providers.items():
+                    if prov_key in row_text:
+                        logger.info(f"🏢 Proveedor desde contenido: {prov_name}")
+                        return prov_name
 
-        # Extraer del filename como fallback
+        # Si no se encuentra, intentar extraer del filename (fallback)
         first_word = filename_clean.split('_')[0].split('-')[0].strip()
-        if first_word and len(first_word) > 2:
-            logger.info(f"🏭 Laboratorio inferido del filename: {first_word.title()}")
-            return first_word.title()
+        if first_word and len(first_word) > 3:
+            # Solo usar si no es un nombre genérico
+            generic_names = ['lista', 'ofertas', 'precios', 'productos', 'catalogo', 'file']
+            if first_word not in generic_names:
+                logger.info(f"🏢 Proveedor inferido del filename: {first_word.title()}")
+                return first_word.title()
 
-        return 'Laboratorio Desconocido'
+        # No se pudo determinar el proveedor desde el archivo
+        logger.warning("⚠️ No se pudo extraer proveedor del archivo")
+        return None
 
     def parse(self):
         try:
@@ -359,9 +448,46 @@ class ExcelOfferParser:
 
             # === EXTRAER INFORMACIÓN GLOBAL del documento ===
             self.vigencia_global = self._extract_vigencia_global(all_sheets_data)
-            self.laboratorio_global = self._extract_laboratorio_global(all_sheets_data)
 
-            logger.info(f"🏭 Laboratorio: {self.laboratorio_global}")
+            # Extraer PROVEEDOR con VALIDACIÓN DE CONSISTENCIA
+            # El proveedor debe ser UNO SOLO y consistente entre archivo y email
+            proveedor_archivo = self._extract_proveedor_from_file(all_sheets_data)
+            proveedor_email = self._extract_proveedor_from_email()
+
+            # VALIDACIÓN: El proveedor del archivo y del email deben coincidir
+            if proveedor_archivo and proveedor_email:
+                # Ambos encontrados: validar que sean el mismo
+                if proveedor_archivo.lower() != proveedor_email.lower():
+                    logger.error(f"❌ INCONSISTENCIA DETECTADA:")
+                    logger.error(f"   Archivo: {proveedor_archivo}")
+                    logger.error(f"   Email:   {proveedor_email}")
+                    logger.error(f"   ⚠️  El proveedor del archivo NO coincide con el dominio del email")
+
+                    # Usar el del archivo (es más confiable)
+                    self.proveedor_global = proveedor_archivo
+                    logger.warning(f"   → Usando proveedor del ARCHIVO: {self.proveedor_global}")
+                else:
+                    # Coinciden: OK
+                    self.proveedor_global = proveedor_archivo
+                    logger.info(f"✅ Proveedor VALIDADO: {self.proveedor_global} (archivo + email coinciden)")
+
+            elif proveedor_archivo:
+                # Solo encontrado en archivo (email es genérico como gmail.com)
+                self.proveedor_global = proveedor_archivo
+                logger.info(f"🏢 Proveedor FINAL: {self.proveedor_global} (desde archivo)")
+                if self.metadata.get('sender', '').lower().endswith('gmail.com'):
+                    logger.info(f"   ℹ️  Email desde Gmail (dominio genérico, usando proveedor del archivo)")
+
+            elif proveedor_email:
+                # Solo encontrado en email (no está en archivo)
+                self.proveedor_global = proveedor_email
+                logger.warning(f"⚠️ Proveedor FINAL: {self.proveedor_global} (solo desde email, no encontrado en archivo)")
+
+            else:
+                # No se pudo determinar el proveedor
+                self.proveedor_global = 'Proveedor Desconocido'
+                logger.error(f"❌ Proveedor FINAL: {self.proveedor_global} (no se pudo determinar)")
+
             logger.info(f"📅 Vigencia: {self.vigencia_global} ({(self.vigencia_global - self.fecha_email).days} días)")
 
             # === PROCESAR CADA HOJA y extraer ofertas ===
@@ -422,7 +548,15 @@ class ExcelOfferParser:
     def _extract_offers_with_global_info(self, column_map):
         """
         Extrae ofertas usando información global del documento.
-        Usa: self.laboratorio_global, self.vigencia_global, self.fecha_email
+
+        Usa:
+        - self.proveedor_global: Quien envía el archivo (Mediven, Socofar, etc.)
+        - self.vigencia_global: Fecha de vencimiento de las ofertas
+        - self.fecha_email: Fecha de inicio de las ofertas
+
+        IMPORTANTE:
+        - PROVEEDOR: Empresa que envía las ofertas (Mediven, Socofar, etc.)
+        - LABORATORIO: Fabricante del producto (3M, Abbott Nutricion, etc.)
         """
         offers = []
 
@@ -468,26 +602,34 @@ class ExcelOfferParser:
                 vigencia_row = self._parse_date(row.get(column_map.get('vigencia', '')))
                 vigencia_final = vigencia_row if vigencia_row else self.vigencia_global
 
-                # Laboratorio de la fila (si existe) o global
-                laboratorio_final = self.laboratorio_global
+                # LABORATORIO: Fabricante del producto (3M, Abbott, etc.)
+                # Leer de la columna 'laboratorio' del Excel
+                laboratorio_fabricante = None
                 if column_map.get('laboratorio'):
                     lab_row = str(row.get(column_map['laboratorio'], '')).strip()
                     if lab_row and lab_row.lower() not in ['nan', 'none', '']:
-                        laboratorio_final = lab_row
+                        laboratorio_fabricante = lab_row
+
+                # Si no hay laboratorio en la fila, usar un valor por defecto
+                if not laboratorio_fabricante:
+                    laboratorio_fabricante = 'Sin Laboratorio'
+
+                # PROVEEDOR: Empresa que envía el archivo (Mediven, Socofar, etc.)
+                # Viene del análisis global del archivo + email
+                proveedor_final = self.proveedor_global if self.proveedor_global else 'Proveedor Desconocido'
 
                 # Descripción
                 descripcion = principio_activo if principio_activo else self.filename
 
-                # PRECIOS CHILENOS: sin decimales innecesarios
-                precio_normal_int = int(precio_normal) if precio_normal == int(precio_normal) else float(precio_normal)
-                precio_oferta_int = int(precio_oferta) if precio_oferta == int(precio_oferta) else float(precio_oferta)
-
+                # Usar precios como Decimal directamente (sin conversiones innecesarias)
+                # Los precios ya vienen parseados correctamente desde _parse_price()
                 offers.append({
                     'producto': producto,
                     'codigo': codigo,
-                    'laboratorio': laboratorio_final,
-                    'precio_normal': precio_normal_int if precio_normal > 0 else precio_oferta_int,
-                    'precio_oferta': precio_oferta_int if precio_oferta > 0 else precio_normal_int,
+                    'proveedor': proveedor_final,  # Quien envía el archivo (Mediven, Socofar, etc.)
+                    'laboratorio': laboratorio_fabricante,  # Fabricante del producto (3M, Abbott, etc.)
+                    'precio_normal': float(precio_normal) if precio_normal > 0 else float(precio_oferta),
+                    'precio_oferta': float(precio_oferta) if precio_oferta > 0 else float(precio_normal),
                     'descuento': round(descuento, 2),
                     'fecha_inicio': self.fecha_email,  # Fecha del email
                     'fecha_fin': vigencia_final,        # Vigencia global o de la fila
@@ -505,15 +647,33 @@ class ExcelOfferParser:
 
     def _parse_price(self, value):
         """
-        Parsea precios manejando tanto formato chileno como americano.
-        Formato chileno: 19.232 (19 mil) o 19.232,50 (19 mil con centavos)
-        Formato americano: 19,232 (19 mil) o 19,232.50 (19 mil con centavos)
+        Parsea precios manejando formato chileno EXCLUSIVAMENTE.
+
+        Formato chileno estándar:
+        - 19.334 = 19334 (diecinueve mil trescientos treinta y cuatro)
+        - 19.334,50 = 19334.50 (con decimales)
+        - 19334 = 19334 (sin formato)
+
+        IMPORTANTE: El punto (.) siempre es separador de miles, NO decimal.
+        La coma (,) es el separador decimal en formato chileno.
         """
         if pd.isna(value):
             return 0
 
-        # Si ya es número, retornar directamente
+        # Si ya es número (pandas leyó la celda como numérico)
         if isinstance(value, (int, float)):
+            # Pandas puede leer 19.334 del Excel como float 19.334
+            # Pero en formato chileno esto significa 19 mil, no 19 con decimales
+            # Convertir directamente a entero para números sin decimales reales
+            if isinstance(value, float):
+                # Verificar si tiene decimales significativos (no .0)
+                if value == int(value):
+                    # No tiene decimales reales, es un entero
+                    return Decimal(str(int(value)))
+                else:
+                    # Tiene decimales reales, usar tal cual
+                    # Redondear a 2 decimales para evitar errores de flotante
+                    return Decimal(str(round(value, 2)))
             return Decimal(str(value))
 
         price_str = str(value).strip()
@@ -521,7 +681,7 @@ class ExcelOfferParser:
         # Remover símbolos de moneda y espacios
         price_str = re.sub(r'[$\s]', '', price_str)
 
-        if not price_str or price_str.lower() in ['nan', 'none', '-']:
+        if not price_str or price_str.lower() in ['nan', 'none', '-', '']:
             return 0
 
         try:
@@ -530,38 +690,62 @@ class ExcelOfferParser:
             has_comma = ',' in price_str
 
             if has_dot and has_comma:
-                # Tiene ambos: determinar cuál es decimal
-                last_dot = price_str.rfind('.')
-                last_comma = price_str.rfind(',')
+                # Formato chileno completo: 1.234.567,89
+                # Punto = miles, Coma = decimal
+                price_str = price_str.replace('.', '').replace(',', '.')
 
-                if last_comma > last_dot:
-                    # Formato chileno: 1.234.567,89
-                    price_str = price_str.replace('.', '').replace(',', '.')
-                else:
-                    # Formato americano: 1,234,567.89
-                    price_str = price_str.replace(',', '')
             elif has_dot and not has_comma:
-                # Solo punto: podría ser miles o decimal
+                # Solo punto: en formato chileno, el punto SIEMPRE es separador de miles
                 parts = price_str.split('.')
-                if len(parts) == 2 and len(parts[1]) == 2:
-                    # Probablemente decimal: 19.50
-                    pass  # Dejar como está
-                elif len(parts) > 2 or (len(parts) == 2 and len(parts[1]) == 3):
-                    # Separador de miles: 19.232 o 1.234.567
+
+                # Casos especiales:
+                # - Un solo punto con 2 dígitos después podría ser decimal americano (19.50)
+                #   PERO en Chile esto sería 19 pesos con 50 centavos, escrito como 19,50
+                # - Un solo punto con 3 dígitos después ES separador de miles (19.334 = 19 mil)
+
+                if len(parts) == 2:
+                    if len(parts[1]) == 3:
+                        # Definitivamente separador de miles chileno: 19.334 = 19334
+                        price_str = price_str.replace('.', '')
+                    elif len(parts[1]) == 2:
+                        # Podría ser decimal o miles
+                        # En formato chileno, 19.50 NO existe, sería 19,50 o 1950
+                        # Asumir que es separador de miles si el número es >1000
+                        if int(parts[0]) >= 10:
+                            # 19.50 se interpreta como 1950 (diecinueve pesos cincuenta centavos)
+                            price_str = price_str.replace('.', '')
+                        else:
+                            # Números pequeños (0.50, 5.50) podrían ser decimales
+                            # Dejar como decimal
+                            pass
+                    elif len(parts[1]) == 1:
+                        # 19.5 - probablemente decimal, dejar como está
+                        pass
+                    else:
+                        # Múltiples puntos o formato extraño: eliminar todos los puntos
+                        price_str = price_str.replace('.', '')
+                else:
+                    # Múltiples puntos: 1.234.567 - separador de miles
                     price_str = price_str.replace('.', '')
-                # else: dejar como está (podría ser 19.2 o 19.23)
+
             elif has_comma and not has_dot:
-                # Solo coma: asumir decimal chileno o separador de miles americano
+                # Solo coma: en formato chileno, coma es decimal
+                # Casos:
+                # - 19,50 = 19.50 (decimal)
+                # - 19,5 = 19.5 (decimal)
+                # - 19,334 = 19.334 (decimal, aunque extraño)
                 parts = price_str.split(',')
-                if len(parts) == 2 and len(parts[1]) <= 2:
-                    # Decimal chileno: 19,50
+                if len(parts) == 2:
+                    # Reemplazar coma por punto para Decimal
                     price_str = price_str.replace(',', '.')
                 else:
-                    # Separador de miles americano: 19,232
+                    # Múltiples comas: formato inválido, eliminar comas
                     price_str = price_str.replace(',', '')
 
             result = Decimal(price_str)
+            logger.debug(f"💰 Precio parseado: '{value}' → {result}")
             return result
+
         except Exception as e:
             logger.warning(f"⚠️ No se pudo parsear precio '{value}': {e}")
             return 0

@@ -52,8 +52,35 @@ class TransaccionViewSet(viewsets.ModelViewSet):
 
 
 class ProductoViewSet(viewsets.ModelViewSet):
-    queryset = Producto.objects.all()
+    queryset = Producto.objects.select_related('proveedor').all()
     serializer_class = ProductoSerializer
+    pagination_class = OfertasPagination  # 50 productos por página
+
+    def get_queryset(self):
+        """Query optimizado con filtros"""
+        queryset = super().get_queryset()
+
+        # FILTRO PRINCIPAL: Solo productos en inventario actual (del último Excel)
+        queryset = queryset.filter(en_inventario_actual=True)
+
+        # Filtro de búsqueda
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(codigo__icontains=search) |
+                Q(nombre__icontains=search) |
+                Q(descripcion__icontains=search) |
+                Q(categoria__icontains=search)
+            )
+
+        # Filtro de stock
+        filtro_stock = self.request.query_params.get('filtro_stock', None)
+        if filtro_stock == 'bajo':
+            queryset = queryset.filter(stock_actual__lt=F('stock_minimo'))
+        elif filtro_stock == 'normal':
+            queryset = queryset.filter(stock_actual__gte=F('stock_minimo'))
+
+        return queryset.order_by('codigo')
 
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
@@ -76,6 +103,63 @@ class ProductoViewSet(viewsets.ModelViewSet):
         ).order_by('-total_vendido')[:limit]
 
         return Response(top_productos)
+
+    @action(detail=False, methods=['get'], url_path='ultima-carga')
+    def ultima_carga(self, request):
+        """Obtiene la fecha y hora de la última carga de inventario"""
+        # Buscar el producto con la fecha de última carga más reciente
+        producto_reciente = Producto.objects.filter(
+            en_inventario_actual=True,
+            fecha_ultima_carga__isnull=False
+        ).order_by('-fecha_ultima_carga').first()
+
+        if producto_reciente and producto_reciente.fecha_ultima_carga:
+            return Response({
+                'fecha_ultima_carga': producto_reciente.fecha_ultima_carga.isoformat(),
+                'tiene_inventario': True
+            })
+        else:
+            return Response({
+                'fecha_ultima_carga': None,
+                'tiene_inventario': False
+            })
+
+    @action(detail=False, methods=['post'])
+    def cargar_excel(self, request):
+        """Cargar productos desde archivo Excel"""
+        archivo = request.FILES.get('archivo')
+
+        if not archivo:
+            return Response(
+                {'error': 'No se proporcionó archivo'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar extensión
+        if not archivo.name.endswith(('.xlsx', '.xls', '.XLS', '.XLSX')):
+            return Response(
+                {'error': 'El archivo debe ser Excel (.xlsx o .xls)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            from core.parsers.product_excel_parser import ProductExcelParser
+
+            parser = ProductExcelParser(archivo)
+            result = parser.parse_and_load()
+
+            return Response({
+                'message': 'Archivo procesado correctamente',
+                'productos_insertados': result.get('insertados', 0),
+                'productos_actualizados': result.get('actualizados', 0),
+                'errores': result.get('errores', [])
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': f'Error procesando archivo: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class ProveedorViewSet(viewsets.ModelViewSet):

@@ -4,7 +4,8 @@ import re
 from decimal import Decimal
 from .models import (
     Cliente, Transaccion, Producto, Proveedor,
-    OfertaLaboratorio, SugerenciaCompra, Venta, DetalleVenta
+    OfertaLaboratorio, SugerenciaCompra, Venta, DetalleVenta,
+    ProductoProveedorMapping
 )
 
 class ClienteSerializer(serializers.ModelSerializer):
@@ -231,10 +232,18 @@ class OfertaLaboratorioDetalladaSerializer(serializers.ModelSerializer):
         ]
 
     def get_proveedor(self, obj):
-        """Obtener nombre del proveedor desde producto o laboratorio"""
+        """
+        Obtener nombre del PROVEEDOR (quien envía el archivo de ofertas).
+
+        IMPORTANTE:
+        - PROVEEDOR: Empresa que envía las ofertas (Mediven, Socofar, etc.)
+        - LABORATORIO: Fabricante del producto (3M, Abbott, etc.) - está en obj.laboratorio
+
+        El proveedor viene de: producto.proveedor.nombre
+        """
         if obj.producto and obj.producto.proveedor:
             return obj.producto.proveedor.nombre
-        return obj.laboratorio or 'Sin proveedor'
+        return 'Sin proveedor'
 
     def get_lote(self, obj):
         """Lote del producto (si existe en el modelo)"""
@@ -284,3 +293,79 @@ class VentaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Venta
         fields = '__all__'
+
+
+class ProductoProveedorMappingSerializer(serializers.ModelSerializer):
+    """Serializer para mapeo producto-proveedor"""
+    producto_codigo = serializers.CharField(source='producto_interno.codigo', read_only=True)
+    producto_nombre = serializers.CharField(source='producto_interno.nombre', read_only=True)
+    proveedor_nombre = serializers.CharField(source='proveedor.nombre', read_only=True)
+    ofertas_activas_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductoProveedorMapping
+        fields = [
+            'id',
+            'producto_interno',
+            'producto_codigo',
+            'producto_nombre',
+            'codigo_proveedor',
+            'proveedor',
+            'proveedor_nombre',
+            'nombre_en_catalogo',
+            'activo',
+            'confianza',
+            'fecha_mapeo',
+            'mapeado_por',
+            'notas',
+            'ofertas_activas_count'
+        ]
+
+    def get_ofertas_activas_count(self, obj):
+        """Cuenta ofertas activas para este mapeo"""
+        return obj.get_ofertas_activas().count()
+
+
+class ProductoConMappingSerializer(serializers.ModelSerializer):
+    """
+    Serializer de producto con información de mappings y ofertas.
+    Útil para ver qué productos tienen códigos mapeados a proveedores.
+    """
+    bajo_stock = serializers.ReadOnlyField()
+    proveedor_nombre = serializers.CharField(source='proveedor.nombre', read_only=True)
+    mappings = ProductoProveedorMappingSerializer(many=True, read_only=True)
+    total_mappings = serializers.SerializerMethodField()
+    tiene_ofertas = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Producto
+        fields = [
+            'id',
+            'codigo',
+            'nombre',
+            'descripcion',
+            'categoria',
+            'stock_actual',
+            'stock_minimo',
+            'precio_unitario',
+            'precio_venta',
+            'precio_costo',
+            'proveedor',
+            'proveedor_nombre',
+            'activo',
+            'bajo_stock',
+            'mappings',
+            'total_mappings',
+            'tiene_ofertas'
+        ]
+
+    def get_total_mappings(self, obj):
+        """Total de mappings activos"""
+        return obj.mappings.filter(activo=True).count()
+
+    def get_tiene_ofertas(self, obj):
+        """Si algún mapping tiene ofertas activas"""
+        for mapping in obj.mappings.filter(activo=True):
+            if mapping.get_ofertas_activas().exists():
+                return True
+        return False
