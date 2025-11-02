@@ -30,10 +30,10 @@ class ProveedorAdmin(admin.ModelAdmin):
 
 @admin.register(OfertaLaboratorio)
 class OfertaLaboratorioAdmin(admin.ModelAdmin):
-    list_display = ('proveedor', 'producto', 'precio_oferta', 'descuento_porcentaje', 'fecha_vigencia', 'activa')
-    list_filter = ('activa', 'proveedor', 'fecha_vigencia')
-    search_fields = ('producto__descripcion', 'proveedor__nombre')
-    date_hierarchy = 'fecha_vigencia'
+    list_display = ('laboratorio', 'producto', 'precio_oferta', 'descuento', 'fecha_inicio', 'fecha_fin', 'activa')
+    list_filter = ('activa', 'laboratorio', 'fecha_inicio')
+    search_fields = ('producto__nombre', 'laboratorio')
+    date_hierarchy = 'fecha_inicio'
 
 @admin.register(SugerenciaCompra)
 class SugerenciaCompraAdmin(admin.ModelAdmin):

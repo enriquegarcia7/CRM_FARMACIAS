@@ -18,6 +18,7 @@ const PurchaseSuggestions = () => {
   });
   const [ofertas, setOfertas] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [archivo, setArchivo] = useState(null);
 
   useEffect(() => {
@@ -27,37 +28,64 @@ const PurchaseSuggestions = () => {
   const cargarDatos = async () => {
     try {
       setLoading(true);
+      setError(null);
 
-      // Datos simulados - reemplazar con llamadas API reales
-      setSugerencias({
-        bajoStock: [
-          { id: 1, producto: 'Amoxicilina 500mg', stockActual: 45, stockMinimo: 100, cantidadSugerida: 200, proveedor: 'Lab. Chile', precioUnitario: 5000, prioridad: 'alta' },
-          { id: 2, producto: 'Atorvastatina 20mg', stockActual: 35, stockMinimo: 80, cantidadSugerida: 150, proveedor: 'Farmalab', precioUnitario: 6000, prioridad: 'alta' },
-          { id: 3, producto: 'Clonazepam 0.5mg', stockActual: 25, stockMinimo: 50, cantidadSugerida: 100, proveedor: 'Pharma Plus', precioUnitario: 5000, prioridad: 'media' },
-          { id: 4, producto: 'Salbutamol Inhalador', stockActual: 15, stockMinimo: 40, cantidadSugerida: 80, proveedor: 'MediSupply', precioUnitario: 12000, prioridad: 'alta' },
-        ],
-        estacionales: [
-          { id: 5, producto: 'Loratadina 10mg', razon: 'Primavera - Alergias estacionales', cantidadSugerida: 300, proveedor: 'Lab. Chile', precioUnitario: 3000, confianza: 0.85 },
-          { id: 6, producto: 'Cetirizina 10mg', razon: 'Primavera - Rinitis alérgica', cantidadSugerida: 250, proveedor: 'Farmalab', precioUnitario: 3500, confianza: 0.82 },
-          { id: 7, producto: 'Budesonida Nasal', razon: 'Primavera - Congestión nasal', cantidadSugerida: 150, proveedor: 'MediSupply', precioUnitario: 15000, confianza: 0.78 },
-        ],
-        epidemiologicas: [
-          { id: 8, producto: 'Oseltamivir 75mg', razon: 'Influenza - Alerta MINSAL', fuente: 'MINSAL Chile', cantidadSugerida: 200, proveedor: 'Pharma Plus', precioUnitario: 25000, urgencia: 'alta' },
-          { id: 9, producto: 'Azitromicina 500mg', razon: 'Infecciones respiratorias - Aumento casos', fuente: 'MINSAL Chile', cantidadSugerida: 180, proveedor: 'Lab. Chile', precioUnitario: 8000, urgencia: 'media' },
-          { id: 10, producto: 'Paracetamol Jarabe', razon: 'Fiebre infantil - Tendencia al alza', fuente: 'MINSAL Chile', cantidadSugerida: 250, proveedor: 'Farmalab', precioUnitario: 4500, urgencia: 'media' },
-        ],
-      });
-
-      // Ofertas de laboratorios
-      setOfertas([
-        { id: 1, laboratorio: 'Lab. Chile', producto: 'Amoxicilina 500mg', descuento: '15%', precioNormal: 5000, precioOferta: 4250, vigencia: '2025-10-31' },
-        { id: 2, laboratorio: 'Farmalab', producto: 'Loratadina 10mg', descuento: '20%', precioNormal: 3000, precioOferta: 2400, vigencia: '2025-10-25' },
-        { id: 3, laboratorio: 'MediSupply', producto: 'Salbutamol Inhalador', descuento: '10%', precioNormal: 12000, precioOferta: 10800, vigencia: '2025-10-28' },
+      // Llamadas paralelas a los 4 endpoints del backend
+      const [bajoStockRes, estacionalesRes, epidemiologicasRes, ofertasRes] = await Promise.all([
+        sugerenciasService.getByLowStock(),
+        sugerenciasService.getBySeason(),
+        sugerenciasService.getByEpidemiological(),
+        ofertasService.getActive()
       ]);
 
-      setLoading(false);
+      // Mapear respuestas del backend al formato esperado por el frontend
+      setSugerencias({
+        bajoStock: bajoStockRes.data.map(item => ({
+          id: item.id,
+          producto: item.producto?.descripcion || item.producto?.nombre || 'Producto sin nombre',
+          stockActual: item.producto?.stock_actual || 0,
+          stockMinimo: item.producto?.stock_minimo || 0,
+          cantidadSugerida: item.cantidad_sugerida,
+          proveedor: item.proveedor?.nombre || 'Sin proveedor',
+          precioUnitario: item.producto?.precio_costo || 0,
+          prioridad: item.prioridad || 'media'
+        })),
+        estacionales: estacionalesRes.data.map(item => ({
+          id: item.id,
+          producto: item.producto?.descripcion || item.producto?.nombre || 'Producto sin nombre',
+          razon: item.razon || 'Temporada actual',
+          cantidadSugerida: item.cantidad_sugerida,
+          proveedor: item.proveedor?.nombre || 'Sin proveedor',
+          precioUnitario: item.producto?.precio_costo || 0,
+          confianza: item.confianza || 0.75
+        })),
+        epidemiologicas: epidemiologicasRes.data.map(item => ({
+          id: item.id,
+          producto: item.producto?.descripcion || item.producto?.nombre || 'Producto sin nombre',
+          razon: item.razon || 'Alerta sanitaria',
+          fuente: item.fuente || 'MINSAL Chile',
+          cantidadSugerida: item.cantidad_sugerida,
+          proveedor: item.proveedor?.nombre || 'Sin proveedor',
+          precioUnitario: item.producto?.precio_costo || 0,
+          urgencia: item.prioridad || 'media'
+        }))
+      });
+
+      // Mapear ofertas de laboratorios
+      setOfertas(ofertasRes.data.map(oferta => ({
+        id: oferta.id,
+        laboratorio: oferta.proveedor?.nombre || 'Laboratorio',
+        producto: oferta.producto?.descripcion || oferta.producto?.nombre || 'Producto',
+        descuento: `${oferta.descuento_porcentaje}%`,
+        precioNormal: oferta.precio_normal,
+        precioOferta: oferta.precio_oferta,
+        vigencia: oferta.fecha_vigencia
+      })));
+
     } catch (error) {
       console.error('Error cargando sugerencias:', error);
+      setError(error.response?.data?.message || error.message || 'Error al cargar sugerencias de compra');
+    } finally {
       setLoading(false);
     }
   };
@@ -100,7 +128,30 @@ const PurchaseSuggestions = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-xl">Cargando sugerencias...</div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <span className="ml-4 text-xl text-gray-600">Cargando sugerencias...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-8 max-w-md">
+          <div className="flex items-center mb-4">
+            <svg className="w-8 h-8 text-red-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 className="text-lg font-semibold text-red-800">Error al cargar sugerencias</h3>
+          </div>
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={cargarDatos}
+            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+          >
+            Reintentar
+          </button>
+        </div>
       </div>
     );
   }
