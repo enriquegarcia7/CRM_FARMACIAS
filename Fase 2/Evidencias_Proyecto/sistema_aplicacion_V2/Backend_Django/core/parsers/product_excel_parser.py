@@ -69,6 +69,13 @@ class ProductExcelParser:
 
             logger.info(f"📋 Columnas finales después del mapeo: {list(df.columns)}")
 
+            # Mostrar muestra de datos para debug
+            if len(df) > 0:
+                logger.info(f"🔍 Muestra de primera fila:")
+                primera_fila = df.iloc[0]
+                for col in df.columns:
+                    logger.info(f"  [{col}] = '{primera_fila[col]}'")
+
             # Validar columnas requeridas
             required_cols = ['CODIGO', 'PRODUCTO']
             missing_cols = [col for col in required_cols if col not in df.columns]
@@ -160,19 +167,25 @@ class ProductExcelParser:
 
                 if producto_existente:
                     # Actualizar producto existente
-                    producto_existente.nombre = nombre
-                    producto_existente.descripcion = descripcion
-                    producto_existente.precio_unitario = precio_unitario
-                    producto_existente.precio_venta = precio_venta
-                    producto_existente.precio_costo = precio_unitario  # Asumir que costo = unitario
-                    producto_existente.stock_actual = stock_actual
-                    producto_existente.categoria = categoria
-                    producto_existente.en_inventario_actual = True
-                    producto_existente.fecha_ultima_carga = ahora
-                    producto_existente.save()
+                    try:
+                        producto_existente.nombre = nombre
+                        producto_existente.descripcion = descripcion
+                        producto_existente.precio_unitario = precio_unitario
+                        producto_existente.precio_venta = precio_venta
+                        producto_existente.precio_costo = precio_unitario  # Asumir que costo = unitario
+                        producto_existente.stock_actual = stock_actual
+                        producto_existente.categoria = categoria
+                        producto_existente.en_inventario_actual = True
+                        producto_existente.fecha_ultima_carga = ahora
+                        producto_existente.save()
 
-                    self.stats['actualizados'] += 1
-                    logger.debug(f"🔄 Actualizado: {codigo} - {nombre}")
+                        self.stats['actualizados'] += 1
+                        logger.debug(f"🔄 Actualizado: {codigo} - {nombre}")
+                    except Exception as e:
+                        error_msg = f"Error actualizando {codigo}: {str(e)}"
+                        self.stats['errores'].append(error_msg)
+                        logger.error(f"❌ {error_msg}")
+                        continue
 
                 else:
                     # Crear nuevo producto

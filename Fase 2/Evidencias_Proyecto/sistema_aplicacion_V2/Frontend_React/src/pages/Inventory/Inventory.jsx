@@ -255,7 +255,7 @@ const Inventory = () => {
             <Search className="absolute left-3 top-3 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar por código, producto o principio activo..."
+              placeholder="Buscar por código o nombre de producto..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -297,9 +297,6 @@ const Inventory = () => {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Producto
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
-                  Principio Activo
-                </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Stock
                 </th>
@@ -321,9 +318,6 @@ const Inventory = () => {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-900">
                       {producto.nombre || producto.descripcion}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                      {producto.categoria}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {producto.stock_actual}
