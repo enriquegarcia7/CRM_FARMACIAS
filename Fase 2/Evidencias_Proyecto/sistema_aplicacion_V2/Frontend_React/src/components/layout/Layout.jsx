@@ -4,6 +4,7 @@ import {
   Package,
   Users,
   ShoppingCart,
+  Tag,
   Database,
   Menu,
   X,
@@ -30,6 +31,7 @@ const Layout = () => {
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/inventario', icon: Package, label: 'Inventario' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
+    { path: '/ofertas-laboratorio', icon: Tag, label: 'Ofertas' },
     { path: '/sugerencias', icon: ShoppingCart, label: 'Sugerencias de Compra' },
     { path: '/etl', icon: Database, label: 'ETL' },
   ];

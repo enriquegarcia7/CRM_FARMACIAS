@@ -105,3 +105,16 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'America/Santiago'
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# Celery Beat Schedule - Tareas Periódicas
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'ejecutar-etl-cada-2-dias': {
+        'task': 'core.tasks.ejecutar_etl_automatico',
+        'schedule': crontab(hour=8, minute=0, day_of_week='*/2'),  # Cada 2 días a las 8:00 AM
+        'options': {
+            'expires': 3600,  # Expira después de 1 hora si no se ejecuta
+        }
+    },
+}

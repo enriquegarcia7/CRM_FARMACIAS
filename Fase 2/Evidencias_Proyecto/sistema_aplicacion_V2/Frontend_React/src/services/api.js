@@ -64,6 +64,22 @@ export const sugerenciasService = {
 // Servicios para Ofertas de Laboratorios (ETL)
 export const ofertasService = {
   getAll: () => api.get('/ofertas/'),
+  getPorLaboratorio: (params = {}) => {
+    // params: { page, page_size, laboratorio, activas, search }
+    const queryParams = new URLSearchParams();
+
+    if (params.page) queryParams.append('page', params.page);
+    if (params.page_size) queryParams.append('page_size', params.page_size);
+    if (params.laboratorio) queryParams.append('laboratorio', params.laboratorio);
+    if (params.search) queryParams.append('search', params.search);
+
+    // Default activas = true
+    const activas = params.activas !== undefined ? params.activas : true;
+    queryParams.append('activas', activas);
+
+    return api.get(`/ofertas/por_laboratorio/?${queryParams.toString()}`);
+  },
+  getLaboratorios: () => api.get('/ofertas/laboratorios/'),
   procesarArchivo: (formData) => api.post('/ofertas/procesar/', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),

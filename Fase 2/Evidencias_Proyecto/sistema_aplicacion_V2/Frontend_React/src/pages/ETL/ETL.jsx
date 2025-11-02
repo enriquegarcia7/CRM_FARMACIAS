@@ -94,11 +94,11 @@ function ETL() {
       setSuccessMessage('');
       setProgress(null);
 
-      // Usar modo amplio (strict_mode=false) para buscar todos los correos con Excel/PDF
-      const response = await etlService.runManual(5, false);
+      // Usar modo amplio (strict_mode=false) para buscar todos los correos con Excel/CSV
+      const response = await etlService.runManual(2, false);
 
       if (response.data.success) {
-        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar y mensajes con palabras clave (últimos 5 días)...');
+        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar y mensajes con palabras clave (últimos 2 días)...');
         setIsRunning(true); // Iniciar polling de progreso
       }
     } catch (err) {
@@ -167,12 +167,32 @@ function ETL() {
         )}
       </div>
 
+      {/* Información de Automatización */}
+      <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-200 rounded-lg p-6 mb-6">
+        <div className="flex items-start gap-4">
+          <div className="bg-purple-100 p-3 rounded-full">
+            <svg className="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold text-purple-900 mb-2">Ejecución Automática Programada</h3>
+            <p className="text-purple-800 mb-2">
+              El ETL se ejecuta automáticamente <strong>cada 2 días a las 8:00 AM</strong> para mantener las ofertas actualizadas.
+            </p>
+            <p className="text-sm text-purple-700">
+              También puedes ejecutarlo manualmente cuando lo necesites usando el botón a continuación.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Botón principal */}
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h2 className="text-xl font-semibold mb-4">Ejecutar ETL Manualmente</h2>
         <p className="text-gray-600 mb-4">
-          Busca correos de Mediven/Socofar y mensajes con palabras clave de ofertas de los últimos 5 días.
-          Los archivos Excel/PDF adjuntos se procesan y las ofertas se cargan en la base de datos.
+          Busca correos de Mediven/Socofar y mensajes con palabras clave de ofertas de los últimos 2 días.
+          Los archivos Excel y CSV adjuntos se procesan y las ofertas se cargan en la base de datos.
         </p>
 
         <button
@@ -358,8 +378,8 @@ function ETL() {
           <div>
             <p className="font-semibold text-blue-900 mb-1">📧 Búsqueda de correos:</p>
             <ul className="list-disc list-inside text-blue-800 text-sm space-y-1 ml-4">
-              <li>Busca correos de los últimos 5 días con adjuntos Excel/PDF</li>
-              <li>Formatos aceptados: .xlsx, .xls, .csv, .pdf</li>
+              <li>Busca correos de los últimos 2 días con adjuntos Excel/CSV</li>
+              <li>Formatos aceptados: .xlsx, .xls, .csv</li>
             </ul>
           </div>
 

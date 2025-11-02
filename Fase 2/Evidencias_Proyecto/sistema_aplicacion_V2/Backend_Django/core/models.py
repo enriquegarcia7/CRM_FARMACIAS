@@ -72,19 +72,27 @@ class Proveedor(models.Model):
 
 class OfertaLaboratorio(models.Model):
     producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='ofertas')
-    laboratorio = models.CharField(max_length=200)
+    laboratorio = models.CharField(max_length=200, db_index=True)  # Índice para filtros
     precio_normal = models.DecimalField(max_digits=10, decimal_places=2)
     precio_oferta = models.DecimalField(max_digits=10, decimal_places=2)
     descuento = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    fecha_inicio = models.DateField()
-    fecha_fin = models.DateField()
-    activa = models.BooleanField(default=True)
+    fecha_inicio = models.DateField(db_index=True)
+    fecha_fin = models.DateField(db_index=True)  # Índice para consultas de vigencia
+    activa = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = 'ofertas_laboratorio'
         verbose_name_plural = "Ofertas de Laboratorios"
         ordering = ['-created_at']
+        indexes = [
+            # Índice para consultas de ofertas vigentes (más usado)
+            models.Index(fields=['activa', 'fecha_fin'], name='idx_activa_fecha_fin'),
+            # Índice para consultas por laboratorio
+            models.Index(fields=['laboratorio', 'activa'], name='idx_lab_activa'),
+            # Índice para consultas por producto
+            models.Index(fields=['producto', 'activa'], name='idx_prod_activa'),
+        ]
 
     def __str__(self):
         return f"{self.laboratorio} - {self.producto.codigo}"
@@ -109,9 +117,41 @@ class ETLLog(models.Model):
         db_table = 'etl_logs'
         verbose_name_plural = "ETL Logs"
         ordering = ['-fecha_ejecucion']
+        indexes = [
+            models.Index(fields=['-fecha_ejecucion'], name='idx_etl_fecha'),
+        ]
 
     def __str__(self):
         return f"ETL {self.fecha_ejecucion.strftime('%Y-%m-%d %H:%M')}"
+
+
+class ArchivoProcesado(models.Model):
+    """
+    Registra archivos procesados por el ETL para evitar reprocesamiento.
+    Usa hash SHA256 del contenido para detectar duplicados.
+    """
+    etl_log = models.ForeignKey(ETLLog, on_delete=models.CASCADE, related_name='archivos_procesados')
+    nombre_archivo = models.CharField(max_length=255)
+    hash_archivo = models.CharField(max_length=64, db_index=True)  # SHA256
+    tamano_bytes = models.BigIntegerField(default=0)
+    ofertas_extraidas = models.IntegerField(default=0)
+    fecha_procesamiento = models.DateTimeField(auto_now_add=True)
+    email_id = models.CharField(max_length=100, blank=True)
+    email_subject = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        db_table = 'archivos_procesados'
+        verbose_name_plural = "Archivos Procesados"
+        ordering = ['-fecha_procesamiento']
+        indexes = [
+            models.Index(fields=['hash_archivo'], name='idx_hash_archivo'),
+            models.Index(fields=['-fecha_procesamiento'], name='idx_fecha_proc'),
+        ]
+        # Evitar duplicados del mismo archivo en la misma ejecución
+        unique_together = [['etl_log', 'hash_archivo']]
+
+    def __str__(self):
+        return f"{self.nombre_archivo} ({self.fecha_procesamiento.strftime('%Y-%m-%d %H:%M')})"
 
 
 class SugerenciaCompra(models.Model):

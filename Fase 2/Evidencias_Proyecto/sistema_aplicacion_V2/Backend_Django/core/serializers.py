@@ -174,6 +174,90 @@ class OfertaLaboratorioSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class OfertaLaboratorioDetalladaSerializer(serializers.ModelSerializer):
+    """
+    Serializer completo para mostrar ofertas por laboratorio
+    con TODOS los campos necesarios en el frontend.
+    """
+    # Proveedor
+    proveedor = serializers.SerializerMethodField()
+
+    # Código producto
+    codigo_producto = serializers.CharField(source='producto.codigo', read_only=True)
+
+    # Descripción del producto
+    descripcion = serializers.CharField(source='producto.nombre', read_only=True)
+
+    # Principio activo
+    principio_activo = serializers.CharField(source='producto.descripcion', read_only=True)
+
+    # Laboratorio (puede venir del campo o de la tabla proveedor)
+    laboratorio = serializers.CharField(read_only=True)
+
+    # Lote (si existe en el producto)
+    lote = serializers.SerializerMethodField()
+
+    # Precio (precio_oferta si existe, sino precio_normal)
+    precio = serializers.SerializerMethodField()
+
+    # % Descuento
+    descuento_porcentaje = serializers.DecimalField(source='descuento', max_digits=5, decimal_places=2, read_only=True)
+
+    # Vigencia (fecha_fin - fecha_inicio)
+    vencimiento_vigencia = serializers.SerializerMethodField()
+
+    # Días de vigencia
+    dias_vigencia = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OfertaLaboratorio
+        fields = [
+            'id',
+            'proveedor',
+            'codigo_producto',
+            'descripcion',
+            'principio_activo',
+            'laboratorio',
+            'lote',
+            'precio',
+            'precio_normal',
+            'precio_oferta',
+            'descuento_porcentaje',
+            'fecha_inicio',
+            'fecha_fin',
+            'vencimiento_vigencia',
+            'dias_vigencia',
+            'activa'
+        ]
+
+    def get_proveedor(self, obj):
+        """Obtener nombre del proveedor desde producto o laboratorio"""
+        if obj.producto and obj.producto.proveedor:
+            return obj.producto.proveedor.nombre
+        return obj.laboratorio or 'Sin proveedor'
+
+    def get_lote(self, obj):
+        """Lote del producto (si existe en el modelo)"""
+        # Por ahora retornar None, pero puede extenderse si se agrega campo lote
+        return None
+
+    def get_precio(self, obj):
+        """Precio final (oferta si existe, sino normal)"""
+        if obj.precio_oferta and obj.precio_oferta > 0:
+            return float(obj.precio_oferta)
+        return float(obj.precio_normal)
+
+    def get_vencimiento_vigencia(self, obj):
+        """Fecha de vencimiento de la vigencia"""
+        return obj.fecha_fin
+
+    def get_dias_vigencia(self, obj):
+        """Días de vigencia restantes"""
+        if obj.fecha_fin and obj.fecha_inicio:
+            return (obj.fecha_fin - obj.fecha_inicio).days
+        return 0
+
+
 class SugerenciaCompraSerializer(serializers.ModelSerializer):
     producto_codigo = serializers.CharField(source='producto.codigo', read_only=True)
     producto_descripcion = serializers.CharField(source='producto.descripcion', read_only=True)

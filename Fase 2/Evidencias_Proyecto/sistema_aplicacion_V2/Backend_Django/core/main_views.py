@@ -1,6 +1,7 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.pagination import PageNumberPagination
 from django.db.models import Count, Sum, Q, F
 from django.db.models.functions import TruncMonth, TruncDate
 from django.utils import timezone
@@ -12,8 +13,16 @@ from .models import (
 from .serializers import (
     ClienteSerializer, TransaccionSerializer, ProductoSerializer,
     ProveedorSerializer, OfertaLaboratorioSerializer,
+    OfertaLaboratorioDetalladaSerializer,
     SugerenciaCompraSerializer, VentaSerializer
 )
+
+
+class OfertasPagination(PageNumberPagination):
+    """Paginación optimizada para ofertas - 50 items por página"""
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 
 class ClienteViewSet(viewsets.ModelViewSet):
@@ -77,6 +86,89 @@ class ProveedorViewSet(viewsets.ModelViewSet):
 class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
     queryset = OfertaLaboratorio.objects.filter(activa=True)
     serializer_class = OfertaLaboratorioSerializer
+
+    @action(detail=False, methods=['get'])
+    def por_laboratorio(self, request):
+        """
+        Obtiene ofertas agrupadas por laboratorio con paginación backend.
+        Query params:
+            - laboratorio: Filtrar por nombre de laboratorio (opcional)
+            - activas: Filtrar solo activas (default: true)
+            - page: Número de página (default: 1)
+            - page_size: Items por página (default: 50, max: 100)
+            - search: Búsqueda en código, descripción, laboratorio
+        """
+        laboratorio = request.query_params.get('laboratorio', None)
+        solo_activas = request.query_params.get('activas', 'true').lower() == 'true'
+        search = request.query_params.get('search', None)
+
+        # Query optimizado con select_related para reducir queries
+        ofertas = OfertaLaboratorio.objects.select_related(
+            'producto',
+            'producto__proveedor'
+        ).only(
+            # Solo campos necesarios para reducir payload
+            'id', 'laboratorio', 'precio_normal', 'precio_oferta',
+            'descuento', 'fecha_inicio', 'fecha_fin', 'activa', 'created_at',
+            'producto__id', 'producto__codigo', 'producto__nombre',
+            'producto__descripcion', 'producto__proveedor__nombre'
+        )
+
+        # Filtros
+        if solo_activas:
+            # Filtrar solo ofertas vigentes
+            today = timezone.now().date()
+            ofertas = ofertas.filter(activa=True, fecha_fin__gte=today)
+
+        if laboratorio:
+            ofertas = ofertas.filter(laboratorio__icontains=laboratorio)
+
+        if search:
+            ofertas = ofertas.filter(
+                Q(producto__codigo__icontains=search) |
+                Q(producto__nombre__icontains=search) |
+                Q(laboratorio__icontains=search) |
+                Q(producto__proveedor__nombre__icontains=search)
+            )
+
+        # Ordenar por laboratorio y producto
+        ofertas = ofertas.order_by('laboratorio', 'producto__nombre')
+
+        # Aplicar paginación backend
+        paginator = OfertasPagination()
+        page = paginator.paginate_queryset(ofertas, request)
+
+        if page is not None:
+            serializer = OfertaLaboratorioDetalladaSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        # Fallback sin paginación (no debería llegar aquí normalmente)
+        serializer = OfertaLaboratorioDetalladaSerializer(ofertas, many=True)
+        return Response({
+            'total': ofertas.count(),
+            'ofertas': serializer.data
+        })
+
+    @action(detail=False, methods=['get'])
+    def laboratorios(self, request):
+        """
+        Lista todos los laboratorios disponibles con ofertas activas y conteo.
+        """
+        laboratorios = (
+            OfertaLaboratorio.objects
+            .filter(activa=True)
+            .values('laboratorio')
+            .annotate(
+                total_ofertas=Count('id'),
+                promedio_descuento=Sum('descuento') / Count('id')
+            )
+            .order_by('-total_ofertas')
+        )
+
+        return Response({
+            'total_laboratorios': laboratorios.count(),
+            'laboratorios': list(laboratorios)
+        })
 
     @action(detail=False, methods=['post'])
     def procesar(self, request):

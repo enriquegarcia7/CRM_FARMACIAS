@@ -1,13 +1,15 @@
 import os
 import json
 import logging
+import hashlib
 from datetime import datetime
 from django.db import transaction
 from django.conf import settings
+from django.utils import timezone
 from core.services.gmail_service import GmailService
 from core.parsers.excel_parser import ExcelOfferParser
 from core.parsers.pdf_parser import PDFOfferParser
-from core.models import OfertaLaboratorio, Producto, Proveedor, ETLLog
+from core.models import OfertaLaboratorio, Producto, Proveedor, ETLLog, ArchivoProcesado
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,7 @@ class OfferETL:
         self.stats = {
             'emails_processed': 0,
             'attachments_downloaded': 0,
+            'attachments_skipped': 0,  # Nuevamente agregado para tracking
             'offers_extracted': 0,
             'offers_inserted': 0,
             'offers_updated': 0,
@@ -25,6 +28,7 @@ class OfferETL:
         self.progress_file = os.path.join(settings.BASE_DIR, 'etl_progress.json')
         self.total_messages = 0
         self.current_message = 0
+        self.etl_log = None  # Para vincular archivos procesados
 
     def _update_progress(self, percentage, stage, message=''):
         """Actualiza el archivo de progreso del ETL"""
@@ -50,11 +54,21 @@ class OfferETL:
             # Inicializar progreso
             self._update_progress(0, 'iniciando', 'Iniciando proceso ETL...')
 
-            # Borrar todas las ofertas existentes antes de cargar nuevas
-            self._update_progress(5, 'limpiando', 'Eliminando ofertas antiguas...')
-            deleted_count = OfertaLaboratorio.objects.all().count()
-            OfertaLaboratorio.objects.all().delete()
-            logger.info(f"🗑️ Deleted {deleted_count} old offers from database")
+            # Crear registro ETL antes de procesar (para vincular archivos)
+            self.etl_log = ETLLog.objects.create(exitoso=False)
+
+            # Eliminar solo las ofertas vencidas, mantener las vigentes
+            self._update_progress(5, 'limpiando', 'Eliminando ofertas vencidas...')
+            today = timezone.now().date()
+
+            vencidas = OfertaLaboratorio.objects.filter(fecha_fin__lt=today)
+            deleted_count = vencidas.count()
+            vencidas.delete()
+
+            vigentes_count = OfertaLaboratorio.objects.filter(fecha_fin__gte=today).count()
+
+            logger.info(f"🗑️ Eliminadas {deleted_count} ofertas vencidas")
+            logger.info(f"✓ Mantenidas {vigentes_count} ofertas vigentes")
 
             # Conectar a Gmail
             self._update_progress(10, 'conectando', 'Conectando a Gmail...')
@@ -134,6 +148,19 @@ class OfferETL:
             logger.error(f"Error processing message {message_id}: {e}")
             self.stats['errors'].append(f"Message {message_id}: {str(e)}")
 
+    def _calculate_hash(self, file_data):
+        """Calcula SHA256 hash del contenido del archivo"""
+        return hashlib.sha256(file_data).hexdigest()
+
+    def _is_file_processed(self, file_hash):
+        """Verifica si el archivo ya fue procesado anteriormente"""
+        # Buscar en los últimos 30 días para no buscar en toda la historia
+        thirty_days_ago = timezone.now() - timezone.timedelta(days=30)
+        return ArchivoProcesado.objects.filter(
+            hash_archivo=file_hash,
+            fecha_procesamiento__gte=thirty_days_ago
+        ).exists()
+
     def _process_attachment(self, attachment):
         filename = attachment['filename']
         file_data = attachment['data']
@@ -142,21 +169,52 @@ class OfferETL:
             if not self._is_valid_extension(filename):
                 return
 
-            logger.info(f"Processing: {filename}")
+            # Calcular hash del archivo
+            file_hash = self._calculate_hash(file_data)
+            file_size = len(file_data)
+
+            # Verificar si ya fue procesado
+            if self._is_file_processed(file_hash):
+                logger.info(f"⏭️ SKIPPED (already processed): {filename} [{file_hash[:8]}...]")
+                self.stats['attachments_skipped'] += 1
+                return
+
+            logger.info(f"📄 Processing: {filename} [{file_hash[:8]}...]")
             self.stats['attachments_downloaded'] += 1
 
             offers = self._parse_file(filename, file_data, attachment)
 
             if not offers:
                 logger.warning(f"No offers from {filename}")
+                # Aún así registrar que se procesó para no reintentar
+                self._register_processed_file(filename, file_hash, file_size, 0, attachment)
                 return
 
             self.stats['offers_extracted'] += len(offers)
             self._load_offers(offers)
 
+            # Registrar archivo procesado exitosamente
+            self._register_processed_file(filename, file_hash, file_size, len(offers), attachment)
+
         except Exception as e:
             logger.error(f"Error processing {filename}: {e}")
             self.stats['errors'].append(f"{filename}: {str(e)}")
+
+    def _register_processed_file(self, filename, file_hash, file_size, offers_count, metadata):
+        """Registra el archivo procesado para evitar reprocesamiento"""
+        try:
+            ArchivoProcesado.objects.create(
+                etl_log=self.etl_log,
+                nombre_archivo=filename,
+                hash_archivo=file_hash,
+                tamano_bytes=file_size,
+                ofertas_extraidas=offers_count,
+                email_id=metadata.get('message_id', ''),
+                email_subject=metadata.get('subject', '')[:500]
+            )
+            logger.info(f"✓ Registered: {filename} ({offers_count} offers)")
+        except Exception as e:
+            logger.warning(f"Could not register file {filename}: {e}")
 
     def _is_valid_extension(self, filename):
         ext = os.path.splitext(filename)[1].lower()
@@ -240,15 +298,32 @@ class OfferETL:
     def _save_log(self, start_time, exitoso):
         try:
             duration = (datetime.now() - start_time).total_seconds()
-            ETLLog.objects.create(
-                emails_procesados=self.stats['emails_processed'],
-                adjuntos_descargados=self.stats['attachments_downloaded'],
-                ofertas_extraidas=self.stats['offers_extracted'],
-                ofertas_insertadas=self.stats['offers_inserted'],
-                ofertas_actualizadas=self.stats['offers_updated'],
-                errores='\n'.join(self.stats['errors']),
-                duracion_segundos=duration,
-                exitoso=exitoso
-            )
+
+            # Actualizar el log existente (creado al inicio)
+            if self.etl_log:
+                self.etl_log.emails_procesados = self.stats['emails_processed']
+                self.etl_log.adjuntos_descargados = self.stats['attachments_downloaded']
+                self.etl_log.ofertas_extraidas = self.stats['offers_extracted']
+                self.etl_log.ofertas_insertadas = self.stats['offers_inserted']
+                self.etl_log.ofertas_actualizadas = self.stats['offers_updated']
+                self.etl_log.errores = '\n'.join(self.stats['errors'])
+                self.etl_log.duracion_segundos = duration
+                self.etl_log.exitoso = exitoso
+                self.etl_log.save()
+
+                logger.info(f"📊 ETL Log actualizado (ID: {self.etl_log.id})")
+                logger.info(f"   Archivos saltados (duplicados): {self.stats.get('attachments_skipped', 0)}")
+            else:
+                # Fallback si no se creó el log al inicio
+                self.etl_log = ETLLog.objects.create(
+                    emails_procesados=self.stats['emails_processed'],
+                    adjuntos_descargados=self.stats['attachments_downloaded'],
+                    ofertas_extraidas=self.stats['offers_extracted'],
+                    ofertas_insertadas=self.stats['offers_inserted'],
+                    ofertas_actualizadas=self.stats['offers_updated'],
+                    errores='\n'.join(self.stats['errors']),
+                    duracion_segundos=duration,
+                    exitoso=exitoso
+                )
         except Exception as e:
             logger.error(f"Error saving ETL log: {e}")

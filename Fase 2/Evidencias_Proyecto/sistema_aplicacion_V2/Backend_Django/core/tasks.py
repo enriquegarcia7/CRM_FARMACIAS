@@ -4,6 +4,35 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+@shared_task(name='core.tasks.ejecutar_etl_automatico')
+def ejecutar_etl_automatico():
+    """
+    Tarea programada para ejecutar ETL automáticamente cada 2 días.
+    Busca correos de los últimos 3 días.
+    """
+    logger.info("🤖 [AUTOMATICO] Iniciando ETL programado cada 2 días")
+
+    try:
+        etl = OfferETL()
+        stats = etl.run(days_back=3, strict_mode=False)
+
+        logger.info(f"✅ [AUTOMATICO] ETL completado exitosamente")
+        logger.info(f"📊 Estadísticas: {stats}")
+
+        return {
+            'success': True,
+            'stats': stats,
+            'tipo': 'automatico'
+        }
+
+    except Exception as e:
+        logger.error(f"❌ [AUTOMATICO] ETL falló: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'tipo': 'automatico'
+        }
+
 @shared_task(name='core.tasks.run_offer_etl_task')
 def run_offer_etl_task(days_back=5, strict_mode=False):
     """
