@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Filter, Tag, TrendingDown, Calendar, Package, ChevronLeft, ChevronRight, Building2 } from 'lucide-react';
+import { Search, Filter, Tag, TrendingDown, Calendar, Package, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ofertasService } from '../../services/api';
 
 const OfertasLaboratorio = () => {
@@ -73,19 +73,6 @@ const OfertasLaboratorio = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  // Calcular estadísticas por proveedor (cargar de ofertas actuales en vista)
-  const getProveedorStats = () => {
-    const stats = {};
-    ofertas.forEach(oferta => {
-      const proveedor = oferta.proveedor || 'Sin proveedor';
-      if (!stats[proveedor]) {
-        stats[proveedor] = 0;
-      }
-      stats[proveedor]++;
-    });
-    return Object.entries(stats).sort((a, b) => b[1] - a[1]);
   };
 
   const nextPage = () => {
@@ -164,7 +151,6 @@ const OfertasLaboratorio = () => {
     );
   }
 
-  const proveedorStats = getProveedorStats();
   const indexOfFirstItem = (currentPage - 1) * itemsPerPage + 1;
   const indexOfLastItem = Math.min(currentPage * itemsPerPage, totalItems);
 
@@ -179,27 +165,6 @@ const OfertasLaboratorio = () => {
           </span>
         </div>
       </div>
-
-      {/* Estadísticas por proveedor */}
-      {proveedorStats.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-6">
-          <div className="flex items-start gap-3 mb-3">
-            <Building2 size={24} className="text-blue-600 mt-1" />
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-blue-900 mb-2">Proveedores en esta página</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                {proveedorStats.map(([proveedor, count]) => (
-                  <div key={proveedor} className="bg-white rounded-lg p-3 shadow-sm">
-                    <p className="text-sm font-semibold text-gray-700 truncate" title={proveedor}>{proveedor}</p>
-                    <p className="text-xl font-bold text-blue-600">{count}</p>
-                    <p className="text-xs text-gray-500">en página actual</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Estadísticas rápidas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

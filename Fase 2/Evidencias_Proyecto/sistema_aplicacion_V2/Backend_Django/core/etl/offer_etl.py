@@ -349,21 +349,42 @@ class OfferETL:
                 continue
 
     def _get_or_create_producto(self, offer_data, proveedor):
+        """
+        Obtiene o crea un producto, asegurando que el proveedor sea el correcto.
+
+        IMPORTANTE: El proveedor es quien envía el archivo (Mediven, Socofar, etc.)
+        Si el producto ya existe con otro proveedor, se ACTUALIZA al proveedor correcto.
+        """
+        producto_existente = None
+
+        # Buscar por código
         if offer_data.get('codigo'):
             try:
-                return Producto.objects.get(codigo=offer_data['codigo'])
+                producto_existente = Producto.objects.get(codigo=offer_data['codigo'])
             except Producto.DoesNotExist:
                 pass
 
-        producto_nombre = offer_data['producto']
-        try:
-            return Producto.objects.get(nombre__iexact=producto_nombre)
-        except Producto.DoesNotExist:
-            pass
+        # Si no se encontró por código, buscar por nombre
+        if not producto_existente:
+            producto_nombre = offer_data['producto']
+            try:
+                producto_existente = Producto.objects.get(nombre__iexact=producto_nombre)
+            except Producto.DoesNotExist:
+                pass
 
+        # Si encontramos el producto existente
+        if producto_existente:
+            # Actualizar el proveedor si es diferente
+            if producto_existente.proveedor != proveedor:
+                producto_existente.proveedor = proveedor
+                producto_existente.save()
+
+            return producto_existente
+
+        # Si no existe, crear nuevo producto
         producto = Producto.objects.create(
             codigo=offer_data.get('codigo') or f"AUTO-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            nombre=producto_nombre,
+            nombre=offer_data['producto'],
             descripcion=f"From {offer_data.get('source_file', 'email')}",
             categoria='Medicamento',
             stock_actual=0,
@@ -372,7 +393,6 @@ class OfferETL:
             proveedor=proveedor
         )
 
-        logger.info(f"→ Created product: {producto.nombre}")
         return producto
 
     def _save_log(self, start_time, exitoso):
