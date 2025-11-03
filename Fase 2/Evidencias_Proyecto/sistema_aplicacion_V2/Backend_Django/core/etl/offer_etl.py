@@ -9,7 +9,10 @@ from django.utils import timezone
 from core.services.gmail_service import GmailService
 from core.parsers.excel_parser import ExcelOfferParser
 from core.parsers.pdf_parser import PDFOfferParser
-from core.models import OfertaLaboratorio, Producto, Proveedor, ETLLog, ArchivoProcesado
+from core.models import (
+    OfertaLaboratorio, Producto, ProductoCatalogo, Proveedor,
+    Laboratorio, Categoria, ETLLog, ArchivoProcesado
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,10 +189,9 @@ class OfferETL:
                 return
 
             self.stats['offers_extracted'] += len(offers)
-            self._load_offers(offers)
 
-            # Registrar archivo procesado exitosamente
-            self._register_processed_file(filename, file_hash, file_size, len(offers), attachment)
+            # Registrar archivo Y cargar ofertas en la MISMA transacción
+            self._load_offers_and_register(offers, filename, file_hash, file_size, attachment)
 
         except Exception as e:
             logger.error(f"Error processing {filename}: {e}")
@@ -229,25 +231,43 @@ class OfferETL:
         return parser.parse()
 
     @transaction.atomic
+    def _load_offers_and_register(self, offers, filename, file_hash, file_size, metadata):
+        """
+        Carga ofertas Y registra el archivo procesado en una SOLA transacción atómica.
+        Si falla alguna oferta, se hace rollback de TODO incluyendo el registro del archivo.
+        """
+        # Cargar ofertas
+        self._load_offers(offers)
+
+        # Registrar archivo procesado (dentro de la misma transacción)
+        ArchivoProcesado.objects.create(
+            etl_log=self.etl_log,
+            nombre_archivo=filename,
+            hash_archivo=file_hash,
+            tamano_bytes=file_size,
+            ofertas_extraidas=len(offers),
+            email_id=metadata.get('message_id', ''),
+            email_subject=metadata.get('subject', '')[:500]
+        )
+        logger.info(f"✓ Archivo registrado: {filename} ({len(offers)} ofertas)")
+
     def _load_offers(self, offers):
         """
-        Carga ofertas con lógica inteligente anti-duplicados:
+        Carga ofertas con lógica inteligente anti-duplicados usando ProductoCatalogo y Laboratorio.
+        NOTA: Este método NO tiene @transaction.atomic porque es llamado desde _load_offers_and_register
 
         Para cada nueva oferta:
-        1. Buscar oferta existente del mismo producto (código + laboratorio)
-        2. Si existe y está VIGENTE (fecha_fin >= hoy):
-           - Comparar precio y descuento
-           - SOLO reemplazar si la nueva es mejor (precio < o descuento >)
-        3. Si existe pero está VENCIDA (fecha_fin < hoy):
-           - Reemplazar siempre
-        4. Si NO existe:
-           - Insertar directamente
+        1. Obtener/Crear Proveedor (quien envía el correo)
+        2. Obtener/Crear Laboratorio (fabricante del producto)
+        3. Obtener/Crear ProductoCatalogo (producto en catálogo de proveedor)
+        4. Buscar oferta existente del mismo producto_catalogo + laboratorio
+        5. Aplicar lógica de reemplazo (vigente/vencida/mejor precio)
         """
         today = timezone.now().date()
 
         for offer_data in offers:
             try:
-                # Obtener o crear PROVEEDOR (quien envía el archivo: Mediven, Socofar, etc.)
+                # 1. Obtener o crear PROVEEDOR (quien envía el archivo: Mediven, Socofar, etc.)
                 proveedor, _ = Proveedor.objects.get_or_create(
                     nombre=offer_data.get('proveedor', 'Proveedor Desconocido'),
                     defaults={
@@ -257,13 +277,21 @@ class OfferETL:
                     }
                 )
 
-                # Obtener o crear producto
-                producto = self._get_or_create_producto(offer_data, proveedor)
+                # 2. Obtener o crear LABORATORIO (fabricante)
+                laboratorio, _ = Laboratorio.objects.get_or_create(
+                    nombre=offer_data.get('laboratorio', 'Sin Laboratorio'),
+                    defaults={
+                        'activo': True
+                    }
+                )
 
-                # Buscar oferta existente del mismo producto + laboratorio
+                # 3. Obtener o crear PRODUCTO en CATÁLOGO
+                producto_catalogo = self._get_or_create_producto_catalogo(offer_data, proveedor)
+
+                # 4. Buscar oferta existente del mismo producto_catalogo + laboratorio
                 oferta_existente = OfertaLaboratorio.objects.filter(
-                    producto=producto,
-                    laboratorio=offer_data['laboratorio'],
+                    producto_catalogo=producto_catalogo,
+                    laboratorio=laboratorio,
                     activa=True
                 ).first()
 
@@ -286,7 +314,7 @@ class OfferETL:
 
                         if precio_mejor or descuento_mejor:
                             # La nueva oferta es mejor, reemplazar
-                            logger.info(f"🔄 Actualizando oferta vigente mejorada: {producto.nombre}")
+                            logger.info(f"🔄 Actualizando oferta vigente mejorada: {producto_catalogo.nombre}")
                             logger.info(f"   Antes: ${precio_existente} ({descuento_existente}% desc)")
                             logger.info(f"   Ahora: ${nuevo_precio} ({nuevo_descuento}% desc)")
 
@@ -295,8 +323,8 @@ class OfferETL:
 
                             # Crear la nueva
                             OfertaLaboratorio.objects.create(
-                                producto=producto,
-                                laboratorio=offer_data.get('laboratorio', 'Sin Laboratorio'),  # Fabricante: 3M, Abbott, etc.
+                                producto_catalogo=producto_catalogo,
+                                laboratorio=laboratorio,
                                 precio_normal=offer_data['precio_normal'],
                                 precio_oferta=offer_data['precio_oferta'],
                                 descuento=offer_data['descuento'],
@@ -307,18 +335,18 @@ class OfferETL:
                             self.stats['offers_updated'] += 1
                         else:
                             # La oferta existente es mejor o igual, mantenerla
-                            logger.info(f"⏭️ Manteniendo oferta vigente existente (mejor precio): {producto.nombre}")
+                            logger.info(f"⏭️ Manteniendo oferta vigente existente (mejor precio): {producto_catalogo.nombre}")
                             # No hacer nada, skip
                             continue
 
                     else:
                         # Oferta VENCIDA: reemplazar siempre
-                        logger.info(f"🔄 Reemplazando oferta vencida: {producto.nombre}")
+                        logger.info(f"🔄 Reemplazando oferta vencida: {producto_catalogo.nombre}")
                         oferta_existente.delete()
 
                         OfertaLaboratorio.objects.create(
-                            producto=producto,
-                            laboratorio=offer_data.get('laboratorio', 'Sin Laboratorio'),  # Fabricante: 3M, Abbott, etc.
+                            producto_catalogo=producto_catalogo,
+                            laboratorio=laboratorio,
                             precio_normal=offer_data['precio_normal'],
                             precio_oferta=offer_data['precio_oferta'],
                             descuento=offer_data['descuento'],
@@ -331,8 +359,8 @@ class OfferETL:
                 else:
                     # NO existe oferta: crear nueva
                     OfertaLaboratorio.objects.create(
-                        producto=producto,
-                        laboratorio=offer_data.get('laboratorio', 'Sin Laboratorio'),  # Fabricante: 3M, Abbott, etc.
+                        producto_catalogo=producto_catalogo,
+                        laboratorio=laboratorio,
                         precio_normal=offer_data['precio_normal'],
                         precio_oferta=offer_data['precio_oferta'],
                         descuento=offer_data['descuento'],
@@ -341,59 +369,52 @@ class OfferETL:
                         activa=offer_data['activa'],
                     )
                     self.stats['offers_inserted'] += 1
-                    logger.info(f"✓ Nueva oferta: {producto.nombre} - Proveedor: {offer_data.get('proveedor')} - Lab: {offer_data.get('laboratorio')}")
+                    logger.info(f"✓ Nueva oferta: {producto_catalogo.nombre} - Proveedor: {proveedor.nombre} - Lab: {laboratorio.nombre}")
 
             except Exception as e:
                 logger.error(f"Error procesando oferta: {e}", exc_info=True)
                 self.stats['errors'].append(f"Offer {offer_data.get('producto', 'Unknown')}: {str(e)}")
                 continue
 
-    def _get_or_create_producto(self, offer_data, proveedor):
+    def _get_or_create_producto_catalogo(self, offer_data, proveedor):
         """
-        Obtiene o crea un producto, asegurando que el proveedor sea el correcto.
+        Obtiene o crea un ProductoCatalogo (producto en catálogo de proveedor).
+        NO es inventario físico, es el catálogo de productos disponibles.
 
-        IMPORTANTE: El proveedor es quien envía el archivo (Mediven, Socofar, etc.)
-        Si el producto ya existe con otro proveedor, se ACTUALIZA al proveedor correcto.
+        IMPORTANTE: Cada proveedor puede tener su propio código para el mismo producto.
         """
-        producto_existente = None
+        codigo = offer_data.get('codigo') or f"AUTO-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-        # Buscar por código
-        if offer_data.get('codigo'):
-            try:
-                producto_existente = Producto.objects.get(codigo=offer_data['codigo'])
-            except Producto.DoesNotExist:
-                pass
-
-        # Si no se encontró por código, buscar por nombre
-        if not producto_existente:
-            producto_nombre = offer_data['producto']
-            try:
-                producto_existente = Producto.objects.get(nombre__iexact=producto_nombre)
-            except Producto.DoesNotExist:
-                pass
-
-        # Si encontramos el producto existente
-        if producto_existente:
-            # Actualizar el proveedor si es diferente
-            if producto_existente.proveedor != proveedor:
-                producto_existente.proveedor = proveedor
-                producto_existente.save()
-
-            return producto_existente
-
-        # Si no existe, crear nuevo producto
-        producto = Producto.objects.create(
-            codigo=offer_data.get('codigo') or f"AUTO-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-            nombre=offer_data['producto'],
-            descripcion=f"From {offer_data.get('source_file', 'email')}",
-            categoria='Medicamento',
-            stock_actual=0,
-            stock_minimo=10,
-            precio_unitario=offer_data['precio_normal'],
+        # Buscar producto en catálogo por código + proveedor
+        producto_catalogo = ProductoCatalogo.objects.filter(
+            codigo=codigo,
             proveedor=proveedor
+        ).first()
+
+        if producto_catalogo:
+            # Actualizar información si cambió
+            producto_catalogo.nombre = offer_data['producto']
+            producto_catalogo.descripcion = f"From {offer_data.get('source_file', 'email')}"
+            producto_catalogo.save()
+            return producto_catalogo
+
+        # Si no existe, crear nuevo producto en catálogo
+        # Obtener categoría por defecto
+        categoria_medicamento, _ = Categoria.objects.get_or_create(
+            nombre='Medicamento',
+            defaults={'activa': True}
         )
 
-        return producto
+        producto_catalogo = ProductoCatalogo.objects.create(
+            codigo=codigo,
+            nombre=offer_data['producto'],
+            descripcion=f"From {offer_data.get('source_file', 'email')}",
+            categoria=categoria_medicamento,
+            proveedor=proveedor,
+            activo=True
+        )
+
+        return producto_catalogo
 
     def _save_log(self, start_time, exitoso):
         try:

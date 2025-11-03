@@ -3,7 +3,7 @@ import logging
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
-from core.models import Producto, Proveedor
+from core.models import Producto, Proveedor, Categoria
 
 logger = logging.getLogger(__name__)
 
@@ -106,12 +106,12 @@ class ProductExcelParser:
     def _load_products(self, df):
         """
         Carga productos en la base de datos.
-        Actualiza si el código ya existe, inserta si es nuevo.
+        ELIMINA todos los productos existentes y carga solo los del Excel actual.
 
         IMPORTANTE:
-        - Marca TODOS los productos como en_inventario_actual=False al inicio
-        - Solo los productos del Excel se marcan como en_inventario_actual=True
-        - Esto asegura que el inventario mostrado sea EXACTAMENTE el del Excel
+        - Limpia completamente la tabla de productos
+        - Solo inserta los productos del Excel actual
+        - Esto asegura que el inventario sea EXACTAMENTE el del Excel
         """
         # Obtener o crear proveedor genérico
         proveedor_generico, _ = Proveedor.objects.get_or_create(
@@ -123,9 +123,11 @@ class ProductExcelParser:
             }
         )
 
-        # PASO 1: Marcar todos los productos como NO en inventario actual
-        logger.info("📋 Marcando todos los productos como fuera del inventario actual...")
-        Producto.objects.all().update(en_inventario_actual=False)
+        # PASO 1: ELIMINAR todos los productos existentes
+        productos_eliminados = Producto.objects.all().count()
+        logger.info(f"🗑️ Eliminando {productos_eliminados} productos existentes...")
+        Producto.objects.all().delete()
+        logger.info("✅ Tabla de productos limpiada completamente")
 
         # Timestamp de esta carga
         ahora = timezone.now()
@@ -159,54 +161,29 @@ class ProductExcelParser:
                 # Código de barras (opcional)
                 codigo_barras = self._clean_string(row.get('CÓDIGO DE BARRAS', ''))
 
-                # Principio activo - intentar inferir desde ofertas de proveedores
-                categoria = self._inferir_principio_activo(codigo, nombre)
+                # Obtener categoría General por defecto
+                categoria_general, _ = Categoria.objects.get_or_create(
+                    nombre='General',
+                    defaults={'activa': True}
+                )
 
-                # Buscar si el producto ya existe
-                producto_existente = Producto.objects.filter(codigo=codigo).first()
+                # Crear nuevo producto (la tabla fue limpiada, todos son nuevos)
+                Producto.objects.create(
+                    codigo=codigo,
+                    nombre=nombre,
+                    descripcion=descripcion,
+                    categoria=categoria_general,
+                    codigo_barras=codigo_barras,
+                    stock_actual=stock_actual,
+                    stock_minimo=10,  # Valor por defecto
+                    precio_venta=precio_venta,
+                    precio_costo=precio_unitario,
+                    proveedor_principal=proveedor_generico,
+                    activo=True
+                )
 
-                if producto_existente:
-                    # Actualizar producto existente
-                    try:
-                        producto_existente.nombre = nombre
-                        producto_existente.descripcion = descripcion
-                        producto_existente.precio_unitario = precio_unitario
-                        producto_existente.precio_venta = precio_venta
-                        producto_existente.precio_costo = precio_unitario  # Asumir que costo = unitario
-                        producto_existente.stock_actual = stock_actual
-                        producto_existente.categoria = categoria
-                        producto_existente.en_inventario_actual = True
-                        producto_existente.fecha_ultima_carga = ahora
-                        producto_existente.save()
-
-                        self.stats['actualizados'] += 1
-                        logger.debug(f"🔄 Actualizado: {codigo} - {nombre}")
-                    except Exception as e:
-                        error_msg = f"Error actualizando {codigo}: {str(e)}"
-                        self.stats['errores'].append(error_msg)
-                        logger.error(f"❌ {error_msg}")
-                        continue
-
-                else:
-                    # Crear nuevo producto
-                    Producto.objects.create(
-                        codigo=codigo,
-                        nombre=nombre,
-                        descripcion=descripcion,
-                        categoria=categoria,
-                        stock_actual=stock_actual,
-                        stock_minimo=10,  # Valor por defecto
-                        precio_unitario=precio_unitario,
-                        precio_venta=precio_venta,
-                        precio_costo=precio_unitario,
-                        proveedor=proveedor_generico,
-                        activo=True,
-                        en_inventario_actual=True,
-                        fecha_ultima_carga=ahora
-                    )
-
-                    self.stats['insertados'] += 1
-                    logger.debug(f"✅ Insertado: {codigo} - {nombre}")
+                self.stats['insertados'] += 1
+                logger.debug(f"✅ Insertado: {codigo} - {nombre}")
 
             except Exception as e:
                 error_msg = f"Fila {index + 2}: {str(e)}"
