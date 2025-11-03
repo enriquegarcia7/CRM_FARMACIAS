@@ -316,3 +316,26 @@ class DetalleVenta(models.Model):
 
     def __str__(self):
         return f"{self.producto.descripcion} x {self.cantidad}"
+
+class VentaHistorica(models.Model):
+    """Modelo para ventas históricas (transacciones)"""
+    fecha = models.DateField()
+    cliente_id = models.IntegerField()
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='ventas')
+    cantidad = models.IntegerField()
+    precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    descuento = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    monto_total = models.DecimalField(max_digits=10, decimal_places=2)
+    
+    class Meta:
+        db_table = 'ventas_historicas'
+        verbose_name = 'Venta Histórica'
+        verbose_name_plural = 'Ventas Históricas'
+        indexes = [
+            models.Index(fields=['fecha']),
+            models.Index(fields=['cliente_id']),
+            models.Index(fields=['producto', 'fecha']),
+        ]
+    
+    def __str__(self):
+        return f"Venta {self.id} - {self.fecha}"

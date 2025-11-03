@@ -7,12 +7,22 @@ import Dashboard from './pages/Dashboard/Dashboard';
 import Inventory from './pages/Inventory/Inventory';
 import Customers from './pages/Customers/Customers';
 import PurchaseSuggestions from './pages/PurchaseSuggestions/PurchaseSuggestions';
+import SeasonalDemand from './pages/SeasonalDemand/SeasonalDemand';  // ← NUEVO
 import OfertasLaboratorio from './pages/OfertasLaboratorio/OfertasLaboratorio';
 import ETL from './pages/ETL/ETL';
 
 function App() {
   return (
     <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Dashboard />} />
+          <Route path="inventario" element={<Inventory />} />
+          <Route path="clientes" element={<Customers />} />
+          <Route path="demanda-estacional" element={<SeasonalDemand />} />  {/* ← NUEVO */}
+          <Route path="sugerencias" element={<PurchaseSuggestions />} />
+        </Route>
+      </Routes>
       <AuthProvider>
         <Routes>
           {/* Ruta pública de Login */}
