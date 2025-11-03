@@ -4,7 +4,7 @@ import {
   Package,
   Users,
   ShoppingCart,
-  TrendingUp,  // ← NUEVO ICONO
+  TrendingUp,
   Tag,
   Database,
   Menu,
@@ -33,7 +33,6 @@ const Layout = () => {
     { path: '/inventario', icon: Package, label: 'Inventario' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
     { path: '/demanda-estacional', icon: TrendingUp, label: 'Demanda Estacional' },  // ← NUEVO
-    { path: '/ofertas-laboratorio', icon: Tag, label: 'Ofertas' },
     { path: '/sugerencias', icon: ShoppingCart, label: 'Sugerencias de Compra' },
     { path: '/etl', icon: Database, label: 'ETL' },
   ];

@@ -54,4 +54,5 @@ urlpatterns = [
     path('api/auth/callback', login_callback, name='login_callback'),
     path('api/auth/session/', check_session, name='check_session'),
     path('api/auth/logout/', logout, name='logout'),
+    path('api/', include('core.urls')),
 ]
