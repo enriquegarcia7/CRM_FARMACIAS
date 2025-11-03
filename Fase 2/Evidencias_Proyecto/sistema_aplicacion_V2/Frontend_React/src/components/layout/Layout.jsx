@@ -1,25 +1,41 @@
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Package,
   Users,
   ShoppingCart,
   TrendingUp,  // ← NUEVO ICONO
+  Tag,
+  Database,
   Menu,
-  X
+  X,
+  LogOut,
+  CheckCircle
 } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 
 const Layout = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const handleLogout = async () => {
+    if (window.confirm('¿Estás seguro de que deseas cerrar sesión? Deberás volver a autorizar con Google.')) {
+      await logout();
+      navigate('/login');
+    }
+  };
 
   const navItems = [
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/inventario', icon: Package, label: 'Inventario' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
     { path: '/demanda-estacional', icon: TrendingUp, label: 'Demanda Estacional' },  // ← NUEVO
+    { path: '/ofertas-laboratorio', icon: Tag, label: 'Ofertas' },
     { path: '/sugerencias', icon: ShoppingCart, label: 'Sugerencias de Compra' },
+    { path: '/etl', icon: Database, label: 'ETL' },
   ];
 
   return (
@@ -68,10 +84,30 @@ const Layout = () => {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="bg-white shadow-sm">
-          <div className="px-6 py-4">
+          <div className="px-6 py-4 flex justify-between items-center">
             <h2 className="text-2xl font-semibold text-gray-800">
               Sistema de Gestión Farmacéutica
             </h2>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
+                {user?.picture && (
+                  <img
+                    src={user.picture}
+                    alt={user.name}
+                    className="w-8 h-8 rounded-full border-2 border-gray-200"
+                  />
+                )}
+                <span className="text-sm text-gray-700 font-medium">{user?.name || user?.email}</span>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50 rounded transition-colors"
+                  title="Cerrar sesión"
+                >
+                  <LogOut size={18} />
+                  <span className="text-sm font-medium">Cerrar Sesión</span>
+                </button>
+              </div>
+            </div>
           </div>
         </header>
 

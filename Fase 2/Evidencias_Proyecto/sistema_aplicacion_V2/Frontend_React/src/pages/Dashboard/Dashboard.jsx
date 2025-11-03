@@ -25,6 +25,7 @@ const Dashboard = () => {
   const [topProductos, setTopProductos] = useState([]);
   const [ventasMensuales, setVentasMensuales] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     cargarDatos();
@@ -36,46 +37,30 @@ const Dashboard = () => {
   const cargarDatos = async () => {
     try {
       setLoading(true);
+      setError(null);
 
-      // Datos simulados - reemplazar con llamadas API reales
+      // Llamadas paralelas a los 3 endpoints del backend
+      const [statsRes, salesRes, topProdRes] = await Promise.all([
+        dashboardService.getStats(),
+        dashboardService.getSalesData(),
+        dashboardService.getTopProducts(10)
+      ]);
+
+      // Mapear respuesta del backend a estructura esperada por el frontend
       setStats({
-        totalVentas: 45780000,
-        ventasMes: 8950000,
-        productosStock: 342,
-        clientesActivos: 128,
+        totalVentas: statsRes.data.total_ventas || 0,
+        ventasMes: statsRes.data.ventas_mes || 0,
+        productosStock: statsRes.data.productos_stock || 0,
+        clientesActivos: statsRes.data.clientes_activos || 0,
       });
 
-      // Top 10 productos más vendidos
-      setTopProductos([
-        { nombre: 'Paracetamol 500mg', cantidad: 850, ventas: 2550000 },
-        { nombre: 'Ibuprofeno 400mg', cantidad: 720, ventas: 2160000 },
-        { nombre: 'Amoxicilina 500mg', cantidad: 650, ventas: 3250000 },
-        { nombre: 'Loratadina 10mg', cantidad: 580, ventas: 1740000 },
-        { nombre: 'Omeprazol 20mg', cantidad: 520, ventas: 2080000 },
-        { nombre: 'Atorvastatina 20mg', cantidad: 480, ventas: 2880000 },
-        { nombre: 'Metformina 850mg', cantidad: 450, ventas: 1800000 },
-        { nombre: 'Losartán 50mg', cantidad: 420, ventas: 2100000 },
-        { nombre: 'Clonazepam 0.5mg', cantidad: 380, ventas: 1900000 },
-        { nombre: 'Enalapril 10mg', cantidad: 350, ventas: 1400000 },
-      ]);
+      setVentasMensuales(salesRes.data || []);
+      setTopProductos(topProdRes.data || []);
 
-      // Ventas mensuales del año
-      setVentasMensuales([
-        { mes: 'Ene', ventas: 6500000 },
-        { mes: 'Feb', ventas: 7200000 },
-        { mes: 'Mar', ventas: 6800000 },
-        { mes: 'Abr', ventas: 7500000 },
-        { mes: 'May', ventas: 8100000 },
-        { mes: 'Jun', ventas: 7800000 },
-        { mes: 'Jul', ventas: 8500000 },
-        { mes: 'Ago', ventas: 8200000 },
-        { mes: 'Sep', ventas: 8800000 },
-        { mes: 'Oct', ventas: 8950000 },
-      ]);
-
-      setLoading(false);
     } catch (error) {
       console.error('Error cargando datos del dashboard:', error);
+      setError(error.response?.data?.message || error.message || 'Error al cargar los datos del dashboard');
+    } finally {
       setLoading(false);
     }
   };
@@ -110,7 +95,30 @@ const Dashboard = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-xl">Cargando dashboard...</div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <span className="ml-4 text-xl text-gray-600">Cargando dashboard...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-8 max-w-md">
+          <div className="flex items-center mb-4">
+            <svg className="w-8 h-8 text-red-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 className="text-lg font-semibold text-red-800">Error al cargar datos</h3>
+          </div>
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={cargarDatos}
+            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+          >
+            Reintentar
+          </button>
+        </div>
       </div>
     );
   }
