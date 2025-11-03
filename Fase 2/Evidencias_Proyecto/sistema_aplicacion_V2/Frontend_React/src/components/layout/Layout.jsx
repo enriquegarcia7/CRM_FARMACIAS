@@ -4,6 +4,7 @@ import {
   Package,
   Users,
   ShoppingCart,
+  TrendingUp,  // ← NUEVO ICONO
   Menu,
   X
 } from 'lucide-react';
@@ -17,6 +18,7 @@ const Layout = () => {
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/inventario', icon: Package, label: 'Inventario' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
+    { path: '/demanda-estacional', icon: TrendingUp, label: 'Demanda Estacional' },  // ← NUEVO
     { path: '/sugerencias', icon: ShoppingCart, label: 'Sugerencias de Compra' },
   ];
 
@@ -44,7 +46,6 @@ const Layout = () => {
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
-
             return (
               <Link
                 key={item.path}

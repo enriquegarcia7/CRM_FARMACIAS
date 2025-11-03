@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard/Dashboard';
 import Inventory from './pages/Inventory/Inventory';
 import Customers from './pages/Customers/Customers';
 import PurchaseSuggestions from './pages/PurchaseSuggestions/PurchaseSuggestions';
+import SeasonalDemand from './pages/SeasonalDemand/SeasonalDemand';  // ← NUEVO
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
           <Route index element={<Dashboard />} />
           <Route path="inventario" element={<Inventory />} />
           <Route path="clientes" element={<Customers />} />
+          <Route path="demanda-estacional" element={<SeasonalDemand />} />  {/* ← NUEVO */}
           <Route path="sugerencias" element={<PurchaseSuggestions />} />
         </Route>
       </Routes>

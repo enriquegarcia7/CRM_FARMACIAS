@@ -28,4 +28,5 @@ urlpatterns = [
     path('', redirect_to_admin),
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/', include('core.urls')),
 ]

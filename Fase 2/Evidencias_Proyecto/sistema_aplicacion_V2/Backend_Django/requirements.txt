@@ -21,3 +21,9 @@ whitenoise==6.6.0
 Pillow==10.2.0
 openpyxl==3.1.2
 python-dateutil==2.8.2
+
+
+scikit-learn==1.6.1
+pandas==2.2.0
+numpy==1.26.4
+joblib==1.4.0
