@@ -1,0 +1,66 @@
+from celery import shared_task
+from core.etl.offer_etl import OfferETL
+import logging
+
+logger = logging.getLogger(__name__)
+
+@shared_task(name='core.tasks.ejecutar_etl_automatico')
+def ejecutar_etl_automatico():
+    """
+    Tarea programada para ejecutar ETL automáticamente cada 2 días.
+    Busca correos de los últimos 3 días.
+    """
+    logger.info("🤖 [AUTOMATICO] Iniciando ETL programado cada 2 días")
+
+    try:
+        etl = OfferETL()
+        stats = etl.run(days_back=3, strict_mode=False)
+
+        logger.info(f"✅ [AUTOMATICO] ETL completado exitosamente")
+        logger.info(f"📊 Estadísticas: {stats}")
+
+        return {
+            'success': True,
+            'stats': stats,
+            'tipo': 'automatico'
+        }
+
+    except Exception as e:
+        logger.error(f"❌ [AUTOMATICO] ETL falló: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'tipo': 'automatico'
+        }
+
+@shared_task(name='core.tasks.run_offer_etl_task')
+def run_offer_etl_task(days_back=5, strict_mode=False):
+    """
+    Celery task para ejecutar ETL automáticamente.
+    Busca correos de los últimos 5 días y reescribe la base de datos de ofertas.
+
+    Args:
+        days_back: Número de días hacia atrás para buscar
+        strict_mode: Si es True, solo busca correos con palabras clave específicas.
+                    Si es False (default), busca todos los correos con adjuntos Excel/PDF.
+    """
+    logger.info(f"🤖 Starting automated ETL task (days_back={days_back}, strict_mode={strict_mode})")
+
+    try:
+        etl = OfferETL()
+        stats = etl.run(days_back=days_back, strict_mode=strict_mode)
+
+        logger.info(f"✓ ETL task completed successfully")
+        logger.info(f"Stats: {stats}")
+
+        return {
+            'success': True,
+            'stats': stats
+        }
+
+    except Exception as e:
+        logger.error(f"❌ ETL task failed: {str(e)}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e)
+        }
