@@ -4,10 +4,9 @@ import {
   Package,
   Users,
   ShoppingCart,
-  TrendingUp,  // ← NUEVO ICONO
+  TrendingUp,
   Tag,
   Database,
-  TrendingUp,  // ← NUEVO ICONO
   Menu,
   X,
   LogOut,
