@@ -8,6 +8,7 @@ const Customers = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [tipoCliente, setTipoCliente] = useState('todos'); // todos, frecuentes, normales
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     cargarClientes();
@@ -20,25 +21,28 @@ const Customers = () => {
   const cargarClientes = async () => {
     try {
       setLoading(true);
-      // Datos simulados - reemplazar con llamada API real
-      const datosSimulados = [
-        { id: 1, nombre: 'María González', correo: 'maria.gonzalez@email.com', telefono: '+56912345678', totalCompras: 15, montoTotal: 2500000, ultimaCompra: '2025-10-10', frecuencia: 'frecuente' },
-        { id: 2, nombre: 'Juan Pérez', correo: 'juan.perez@email.com', telefono: '+56987654321', totalCompras: 8, montoTotal: 1200000, ultimaCompra: '2025-10-12', frecuencia: 'frecuente' },
-        { id: 3, nombre: 'Ana Silva', correo: 'ana.silva@email.com', telefono: '+56923456789', totalCompras: 3, montoTotal: 450000, ultimaCompra: '2025-10-05', frecuencia: 'normal' },
-        { id: 4, nombre: 'Pedro Martínez', correo: 'pedro.martinez@email.com', telefono: '+56934567890', totalCompras: 12, montoTotal: 1850000, ultimaCompra: '2025-10-13', frecuencia: 'frecuente' },
-        { id: 5, nombre: 'Carmen López', correo: 'carmen.lopez@email.com', telefono: '+56945678901', totalCompras: 7, montoTotal: 980000, ultimaCompra: '2025-10-11', frecuencia: 'frecuente' },
-        { id: 6, nombre: 'Roberto Díaz', correo: 'roberto.diaz@email.com', telefono: '+56956789012', totalCompras: 2, montoTotal: 280000, ultimaCompra: '2025-09-28', frecuencia: 'normal' },
-        { id: 7, nombre: 'Laura Fernández', correo: 'laura.fernandez@email.com', telefono: '+56967890123', totalCompras: 18, montoTotal: 3200000, ultimaCompra: '2025-10-14', frecuencia: 'frecuente' },
-        { id: 8, nombre: 'Carlos Rojas', correo: 'carlos.rojas@email.com', telefono: '+56978901234', totalCompras: 4, montoTotal: 620000, ultimaCompra: '2025-10-08', frecuencia: 'normal' },
-        { id: 9, nombre: 'Patricia Muñoz', correo: 'patricia.munoz@email.com', telefono: '+56989012345', totalCompras: 10, montoTotal: 1450000, ultimaCompra: '2025-10-13', frecuencia: 'frecuente' },
-        { id: 10, nombre: 'Jorge Soto', correo: 'jorge.soto@email.com', telefono: '+56990123456', totalCompras: 6, montoTotal: 850000, ultimaCompra: '2025-10-09', frecuencia: 'frecuente' },
-        { id: 11, nombre: 'Sofía Castro', correo: 'sofia.castro@email.com', telefono: '+56901234567', totalCompras: 1, montoTotal: 120000, ultimaCompra: '2025-09-15', frecuencia: 'normal' },
-        { id: 12, nombre: 'Diego Ramírez', correo: 'diego.ramirez@email.com', telefono: '+56912345670', totalCompras: 14, montoTotal: 2100000, ultimaCompra: '2025-10-12', frecuencia: 'frecuente' },
-      ];
-      setClientes(datosSimulados);
-      setLoading(false);
+      setError(null);
+
+      // Consumir API real del backend
+      const response = await clientesService.getAll();
+
+      // Mapear datos del backend al formato esperado por el frontend
+      const clientesFormateados = response.data.map(cliente => ({
+        id: cliente.id,
+        nombre: cliente.nombre,
+        correo: cliente.correo,
+        telefono: cliente.telefono || 'N/A',
+        totalCompras: cliente.transacciones?.length || 0,
+        montoTotal: cliente.monto_total_gastado || 0,
+        ultimaCompra: cliente.fecha_registro,
+        frecuencia: (cliente.transacciones?.length || 0) >= 5 ? 'frecuente' : 'normal'
+      }));
+
+      setClientes(clientesFormateados);
     } catch (error) {
       console.error('Error cargando clientes:', error);
+      setError(error.response?.data?.message || error.message || 'Error al cargar clientes');
+    } finally {
       setLoading(false);
     }
   };
@@ -93,7 +97,30 @@ const Customers = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="text-xl">Cargando clientes...</div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <span className="ml-4 text-xl text-gray-600">Cargando clientes...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-8 max-w-md">
+          <div className="flex items-center mb-4">
+            <svg className="w-8 h-8 text-red-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 className="text-lg font-semibold text-red-800">Error al cargar clientes</h3>
+          </div>
+          <p className="text-red-600 mb-4">{error}</p>
+          <button
+            onClick={cargarClientes}
+            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
+          >
+            Reintentar
+          </button>
+        </div>
       </div>
     );
   }

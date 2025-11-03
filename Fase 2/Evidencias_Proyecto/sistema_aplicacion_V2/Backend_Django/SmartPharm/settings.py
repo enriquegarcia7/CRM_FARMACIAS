@@ -24,6 +24,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'core',
     'rest_framework',
+    'django_celery_beat',
+    'django_celery_results',
 ]
 
 MIDDLEWARE = [
@@ -98,3 +100,47 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Celery Configuration
+import os
+CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://redis:6379/0')
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_CACHE_BACKEND = 'django-cache'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'America/Santiago'
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# Celery Beat Schedule - Tareas Periódicas
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    'ejecutar-etl-cada-2-dias': {
+        'task': 'core.tasks.ejecutar_etl_automatico',
+        'schedule': crontab(hour=8, minute=0, day_of_week='*/2'),  # Cada 2 días a las 8:00 AM
+        'options': {
+            'expires': 3600,  # Expira después de 1 hora si no se ejecuta
+        }
+    },
+}
