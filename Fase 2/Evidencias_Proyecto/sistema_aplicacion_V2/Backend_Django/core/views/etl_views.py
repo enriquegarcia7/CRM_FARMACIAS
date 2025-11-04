@@ -156,3 +156,46 @@ def get_etl_progress(request):
             'success': False,
             'error': str(e)
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_etl_diagnostic(request):
+    """
+    Obtener información de diagnóstico de los correos encontrados.
+    GET /api/etl/diagnostic/?days_back=3
+
+    Muestra todos los correos encontrados y su estado de validación,
+    útil para diagnosticar por qué algunos correos no se procesan.
+    """
+    try:
+        days_back = int(request.GET.get('days_back', 3))
+
+        logger.info(f"🔍 ETL Diagnostic requested (days_back={days_back})")
+
+        from core.services.gmail_service import GmailService
+
+        gmail_service = GmailService()
+        diagnostic_data = gmail_service.get_diagnostic_info(days_back=days_back)
+
+        logger.info(f"✅ Diagnostic completed: {diagnostic_data['total_found']} messages found")
+
+        return Response({
+            'success': True,
+            'diagnostic': diagnostic_data
+        })
+
+    except FileNotFoundError as e:
+        # Gmail no autenticado
+        logger.warning(f"Gmail not authenticated: {e}")
+        return Response({
+            'success': False,
+            'error': 'Gmail no está autenticado. Por favor, autentícate primero.',
+            'needs_auth': True
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    except Exception as e:
+        logger.error(f"Error getting ETL diagnostic: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

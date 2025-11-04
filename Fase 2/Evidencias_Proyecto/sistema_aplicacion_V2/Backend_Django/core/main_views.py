@@ -238,11 +238,12 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
     def laboratorios(self, request):
         """
         Lista todos los laboratorios disponibles con ofertas activas y conteo.
+        Devuelve el NOMBRE del laboratorio (no el ID) para mostrar en el filtro.
         """
         laboratorios = (
             OfertaLaboratorio.objects
             .filter(activa=True)
-            .values('laboratorio')
+            .values('laboratorio__nombre')  # ✅ Cambiado de 'laboratorio' a 'laboratorio__nombre'
             .annotate(
                 total_ofertas=Count('id'),
                 promedio_descuento=Sum('descuento') / Count('id')
@@ -250,9 +251,19 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
             .order_by('-total_ofertas')
         )
 
+        # Mapear laboratorio__nombre a "laboratorio" para mantener compatibilidad con frontend
+        laboratorios_list = [
+            {
+                'laboratorio': lab['laboratorio__nombre'],
+                'total_ofertas': lab['total_ofertas'],
+                'promedio_descuento': lab['promedio_descuento']
+            }
+            for lab in laboratorios
+        ]
+
         return Response({
-            'total_laboratorios': laboratorios.count(),
-            'laboratorios': list(laboratorios)
+            'total_laboratorios': len(laboratorios_list),
+            'laboratorios': laboratorios_list
         })
 
     @action(detail=False, methods=['post'])

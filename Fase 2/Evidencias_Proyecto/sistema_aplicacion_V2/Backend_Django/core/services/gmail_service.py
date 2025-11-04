@@ -14,17 +14,27 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
 # Configuración de validación
 EXCLUDED_SENDERS = ['proyectosmartpharm2025@gmail.com']
-TRUSTED_DOMAINS = ['mediven', 'socofar']  # Dominios confiables (sin @)
+TRUSTED_DOMAINS = ['mediven', 'socofar', 'provefarma']  # Dominios confiables (sin @)
 
 # Palabras clave (singular y plural, con y sin tildes)
+# Se buscan en asunto Y cuerpo del correo (case-insensitive)
 KEYWORDS = [
-    'precio', 'precios',
-    'oferta', 'ofertas',
-    'laboratorio', 'laboratorios',
-    'promocion', 'promoción', 'promociones', 'promociónes',
-    'lista', 'listas',
-    'descuento', 'descuentos',
-    'farmacia', 'farmacias'
+    # Precios
+    'precio', 'precios', 'tarifa', 'tarifas', 'costo', 'costos', 'valor', 'valores',
+    # Ofertas y promociones
+    'oferta', 'ofertas', 'promocion', 'promoción', 'promociones', 'promociónes',
+    'rebaja', 'rebajas', 'especial', 'especiales',
+    # Descuentos
+    'descuento', 'descuentos', 'dto', 'dscto',
+    # Listas y catálogos
+    'lista', 'listas', 'catalogo', 'catálogo', 'catalogos', 'catálogos',
+    'listado', 'listados',
+    # Laboratorios
+    'laboratorio', 'laboratorios', 'lab', 'labs',
+    # Farmacias
+    'farmacia', 'farmacias',
+    # Stock y productos
+    'stock', 'producto', 'productos', 'medicamento', 'medicamentos'
 ]
 
 class GmailService:
@@ -194,23 +204,32 @@ class GmailService:
             logger.error(f"Error validating message: {e}")
             return False
 
-    def get_attachments(self, message_id):
+    def _extract_attachments_recursive(self, parts, message_id, depth=0):
+        """
+        Extrae adjuntos de forma recursiva de todas las partes del mensaje.
+        Algunos correos tienen adjuntos en partes anidadas (multipart/mixed, multipart/alternative).
+
+        Args:
+            parts: Lista de partes del mensaje
+            message_id: ID del mensaje
+            depth: Profundidad de recursión (para evitar loops infinitos)
+
+        Returns:
+            Lista de diccionarios con información de adjuntos
+        """
         attachments = []
-        try:
-            message = self.get_message_detail(message_id)
-            if not message:
-                return attachments
 
-            headers = message['payload'].get('headers', [])
-            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
-            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
-            date = next((h['value'] for h in headers if h['name'] == 'Date'), 'No Date')
+        if depth > 10:  # Límite de seguridad
+            logger.warning(f"Max recursion depth reached for message {message_id}")
+            return attachments
 
-            parts = message['payload'].get('parts', [])
-            for part in parts:
-                if part.get('filename'):
-                    attachment_id = part['body'].get('attachmentId')
-                    if attachment_id:
+        for part in parts:
+            # Si la parte tiene nombre de archivo, es un adjunto
+            filename = part.get('filename')
+            if filename:
+                attachment_id = part['body'].get('attachmentId')
+                if attachment_id:
+                    try:
                         attachment = self.service.users().messages().attachments().get(
                             userId='me', messageId=message_id, id=attachment_id
                         ).execute()
@@ -218,20 +237,94 @@ class GmailService:
                         file_data = base64.urlsafe_b64decode(attachment['data'].encode('UTF-8'))
 
                         attachments.append({
-                            'filename': part['filename'],
-                            'mime_type': part['mimeType'],
-                            'size': part['body'].get('size', 0),
+                            'filename': filename,
+                            'mime_type': part.get('mimeType', 'unknown'),
+                            'size': part['body'].get('size', len(file_data)),
                             'data': file_data,
-                            'sender': sender,
-                            'subject': subject,
-                            'date': date,
-                            'message_id': message_id
                         })
+                        logger.debug(f"  ✓ Found attachment: {filename} ({part.get('mimeType')})")
+                    except Exception as e:
+                        logger.error(f"  ✗ Error downloading attachment {filename}: {e}")
 
-            logger.info(f"📎 Message {message_id}: {len(attachments)} attachments")
+            # Si la parte tiene subpartes, buscar recursivamente
+            if 'parts' in part:
+                nested_attachments = self._extract_attachments_recursive(
+                    part['parts'], message_id, depth + 1
+                )
+                attachments.extend(nested_attachments)
+
+        return attachments
+
+    def get_attachments(self, message_id):
+        """
+        Obtiene todos los adjuntos de un mensaje de forma recursiva.
+        Maneja correctamente correos con estructura multipart anidada.
+        """
+        attachments = []
+        try:
+            message = self.get_message_detail(message_id)
+            if not message:
+                logger.warning(f"Could not get message detail for {message_id}")
+                return attachments
+
+            headers = message['payload'].get('headers', [])
+            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+            date = next((h['value'] for h in headers if h['name'] == 'Date'), 'No Date')
+
+            logger.info(f"📧 Extracting attachments from: {subject[:50]}...")
+            logger.debug(f"   From: {sender}")
+            logger.debug(f"   Date: {date}")
+
+            # Buscar adjuntos en el payload (puede tener 'parts' o ser un mensaje simple)
+            payload = message.get('payload', {})
+
+            # Caso 1: Mensaje con partes (multipart)
+            if 'parts' in payload:
+                attachments_list = self._extract_attachments_recursive(
+                    payload['parts'], message_id
+                )
+            else:
+                # Caso 2: Mensaje simple (raro que tenga adjuntos, pero se maneja)
+                attachments_list = []
+                if payload.get('filename'):
+                    attachment_id = payload['body'].get('attachmentId')
+                    if attachment_id:
+                        try:
+                            attachment = self.service.users().messages().attachments().get(
+                                userId='me', messageId=message_id, id=attachment_id
+                            ).execute()
+                            file_data = base64.urlsafe_b64decode(attachment['data'].encode('UTF-8'))
+                            attachments_list.append({
+                                'filename': payload['filename'],
+                                'mime_type': payload.get('mimeType', 'unknown'),
+                                'size': payload['body'].get('size', len(file_data)),
+                                'data': file_data,
+                            })
+                        except Exception as e:
+                            logger.error(f"Error downloading attachment: {e}")
+
+            # Agregar metadatos a cada adjunto
+            for att in attachments_list:
+                att.update({
+                    'sender': sender,
+                    'subject': subject,
+                    'date': date,
+                    'message_id': message_id
+                })
+                attachments.append(att)
+
+            if attachments:
+                logger.info(f"📎 Found {len(attachments)} attachment(s) in message {message_id[:10]}...")
+                for att in attachments:
+                    logger.info(f"   - {att['filename']} ({att['size']} bytes, {att['mime_type']})")
+            else:
+                logger.warning(f"⚠️ No attachments found in message {message_id[:10]}...")
+
             return attachments
+
         except Exception as e:
-            logger.error(f"Error getting attachments: {e}")
+            logger.error(f"❌ Error getting attachments from {message_id}: {e}", exc_info=True)
             return []
 
     def search_offers_emails(self, days_back=3, strict_mode=False):
@@ -253,20 +346,131 @@ class GmailService:
             f'(filename:xlsx OR filename:xls OR filename:pdf OR filename:csv)'
         )
         logger.info(f"🔍 Searching emails with Excel/PDF attachments from last {days_back} days")
+        logger.info(f"🔍 Query: {query}")
 
         # Obtener mensajes
         messages = self.get_messages(query=query)
-        logger.info(f"📧 Found {len(messages)} messages with attachments")
+        logger.info(f"📧 Found {len(messages)} total message(s) with attachments")
+
+        if not messages:
+            logger.warning("⚠️ No messages found matching search criteria")
+            return []
 
         # Aplicar validaciones
         validated_messages = []
-        for msg in messages:
+        rejected_by_sender = 0
+        rejected_no_keywords = 0
+
+        for idx, msg in enumerate(messages, 1):
+            logger.info(f"\n--- Validating message {idx}/{len(messages)} (ID: {msg['id'][:10]}...) ---")
+
             # Obtener detalles del mensaje para validación
             message_detail = self.get_message_detail(msg['id'])
-            if message_detail and self._validate_message(message_detail):
-                validated_messages.append(msg)
+            if not message_detail:
+                logger.error(f"❌ Could not get message detail for {msg['id']}")
+                continue
 
-        logger.info(f"✅ {len(validated_messages)} messages passed validation")
-        logger.info(f"❌ {len(messages) - len(validated_messages)} messages rejected")
+            # Extraer información básica
+            headers = message_detail['payload'].get('headers', [])
+            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+
+            logger.info(f"  From: {sender}")
+            logger.info(f"  Subject: {subject[:80]}...")
+
+            # Validar
+            if self._validate_message(message_detail):
+                validated_messages.append(msg)
+                logger.info(f"  ✅ Message ACCEPTED")
+            else:
+                # Determinar razón del rechazo
+                if self._is_excluded_sender(sender):
+                    rejected_by_sender += 1
+                    logger.info(f"  ❌ Message REJECTED: Excluded sender")
+                else:
+                    rejected_no_keywords += 1
+                    logger.info(f"  ❌ Message REJECTED: Not trusted domain and no keywords found")
+
+        logger.info(f"\n{'='*60}")
+        logger.info(f"📊 VALIDATION SUMMARY:")
+        logger.info(f"  Total found: {len(messages)}")
+        logger.info(f"  ✅ Accepted: {len(validated_messages)}")
+        logger.info(f"  ❌ Rejected: {len(messages) - len(validated_messages)}")
+        logger.info(f"    - By excluded sender: {rejected_by_sender}")
+        logger.info(f"    - No keywords/trusted domain: {rejected_no_keywords}")
+        logger.info(f"{'='*60}\n")
 
         return validated_messages
+
+    def get_diagnostic_info(self, days_back=3):
+        """
+        Obtiene información detallada de diagnóstico de todos los correos encontrados.
+        NO procesa los correos, solo obtiene información para diagnóstico.
+
+        Returns:
+            dict: Información detallada de cada correo (validación, adjuntos, etc.)
+        """
+        query = (
+            f'has:attachment newer_than:{days_back}d '
+            f'(filename:xlsx OR filename:xls OR filename:pdf OR filename:csv)'
+        )
+
+        messages = self.get_messages(query=query)
+        diagnostic_data = {
+            'total_found': len(messages),
+            'search_query': query,
+            'days_back': days_back,
+            'messages': []
+        }
+
+        for msg in messages:
+            message_detail = self.get_message_detail(msg['id'])
+            if not message_detail:
+                continue
+
+            headers = message_detail['payload'].get('headers', [])
+            sender = next((h['value'] for h in headers if h['name'] == 'From'), 'Unknown')
+            subject = next((h['value'] for h in headers if h['name'] == 'Subject'), 'No Subject')
+            date = next((h['value'] for h in headers if h['name'] == 'Date'), 'No Date')
+
+            # Validación
+            passes_validation = self._validate_message(message_detail)
+            is_excluded = self._is_excluded_sender(sender)
+            is_trusted = self._is_trusted_domain(sender)
+            has_keywords = self._contains_keywords(subject)
+
+            # Contar adjuntos (sin descargarlos)
+            payload = message_detail.get('payload', {})
+            attachment_count = self._count_attachments_recursive(payload.get('parts', []))
+
+            diagnostic_data['messages'].append({
+                'id': msg['id'],
+                'sender': sender,
+                'subject': subject,
+                'date': date,
+                'validation': {
+                    'passes': passes_validation,
+                    'is_excluded': is_excluded,
+                    'is_trusted_domain': is_trusted,
+                    'has_keywords': has_keywords,
+                },
+                'attachment_count': attachment_count
+            })
+
+        return diagnostic_data
+
+    def _count_attachments_recursive(self, parts, depth=0):
+        """
+        Cuenta adjuntos de forma recursiva sin descargarlos.
+        """
+        if not parts or depth > 10:
+            return 0
+
+        count = 0
+        for part in parts:
+            if part.get('filename'):
+                count += 1
+            if 'parts' in part:
+                count += self._count_attachments_recursive(part['parts'], depth + 1)
+
+        return count
