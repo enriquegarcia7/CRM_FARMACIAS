@@ -7,7 +7,7 @@ from core.views import (
     ProveedorViewSet, OfertaLaboratorioViewSet,
     SugerenciaCompraViewSet, VentaViewSet, DashboardViewSet
 )
-from core.views.etl_views import run_etl_manual, get_etl_logs, get_etl_status, get_etl_progress
+from core.views.etl_views import run_etl_manual, get_etl_logs, get_etl_status, get_etl_progress, get_etl_diagnostic
 from core.views.gmail_auth_views import (
     check_gmail_auth, start_gmail_auth, gmail_auth_callback, revoke_gmail_auth
 )
@@ -35,13 +35,13 @@ urlpatterns = [
     path('', redirect_to_admin),
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
-    
 
     # ETL endpoints
     path('api/etl/run/', run_etl_manual, name='run_etl'),
     path('api/etl/logs/', get_etl_logs, name='etl_logs'),
     path('api/etl/status/', get_etl_status, name='etl_status'),
     path('api/etl/progress/', get_etl_progress, name='etl_progress'),
+    path('api/etl/diagnostic/', get_etl_diagnostic, name='etl_diagnostic'),
 
     # Gmail OAuth endpoints
     path('api/gmail/auth/status/', check_gmail_auth, name='gmail_auth_status'),

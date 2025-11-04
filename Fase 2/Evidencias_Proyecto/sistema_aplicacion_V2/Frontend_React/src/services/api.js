@@ -108,7 +108,8 @@ export const etlService = {
   }),
   getLogs: () => api.get('/etl/logs/'),
   getStatus: () => api.get('/etl/status/'),
-  getProgress: () => api.get('/etl/progress/')
+  getProgress: () => api.get('/etl/progress/'),
+  getDiagnostic: (daysBack = 3) => api.get(`/etl/diagnostic/?days_back=${daysBack}`)
 };
 
 // Servicios para Gmail OAuth
@@ -116,6 +117,16 @@ export const gmailAuthService = {
   checkStatus: () => api.get('/gmail/auth/status/'),
   startAuth: () => api.get('/gmail/auth/start/'),
   revokeAuth: () => api.delete('/gmail/auth/revoke/')
+};
+
+// Servicios para Ventas
+export const ventasService = {
+  getAll: () => api.get('/ventas/'),
+  getById: (id) => api.get(`/ventas/${id}/`),
+  create: (data) => api.post('/ventas/', data),
+  update: (id, data) => api.put(`/ventas/${id}/`, data),
+  delete: (id) => api.delete(`/ventas/${id}/`),
+  getStats: () => api.get('/ventas/stats/'),
 };
 
 // Servicios para Autenticación de Usuario (Login con Google)

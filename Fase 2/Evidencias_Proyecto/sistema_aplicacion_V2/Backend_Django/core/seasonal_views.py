@@ -34,7 +34,7 @@ def predict_seasonal_demand(request):
         
         # Obtener datos históricos de la categoría
         historico = VentaHistorica.objects.filter(
-            producto__categoria=categoria
+            producto__categoria__nombre=categoria
         ).annotate(
             mes_venta=TruncMonth('fecha')
         ).values('mes_venta').annotate(
@@ -156,7 +156,7 @@ def get_seasonal_predictions_year(request):
         
         # Obtener datos históricos
         historico = VentaHistorica.objects.filter(
-            producto__categoria=categoria
+            producto__categoria__nombre=categoria
         ).annotate(
             mes_venta=TruncMonth('fecha')
         ).values('mes_venta').annotate(

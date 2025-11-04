@@ -95,10 +95,10 @@ function ETL() {
       setProgress(null);
 
       // Usar modo amplio (strict_mode=false) para buscar todos los correos con Excel/CSV
-      const response = await etlService.runManual(2, false);
+      const response = await etlService.runManual(5, false);
 
       if (response.data.success) {
-        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar y mensajes con palabras clave (últimos 2 días)...');
+        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar/Provefarma y mensajes con palabras clave (últimos 5 días)...');
         setIsRunning(true); // Iniciar polling de progreso
       }
     } catch (err) {

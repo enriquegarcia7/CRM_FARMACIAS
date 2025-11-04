@@ -28,49 +28,62 @@ class ExcelOfferParser:
     COLUMN_MAPPINGS = {
         # PARA core_producto.nombre (nombre del medicamento)
         'producto': [
-            'descripcion', 'descripción',
+            'descripcion', 'descripción', 'descrip',
+            'descriptor',  # ✅ Provefarma usa "descriptor"
             'producto', 'productos', 'product',
-            'medicamento', 'medicamentos',
-            'nombre', 'item', 'articulo', 'artículo'
+            'medicamento', 'medicamentos', 'med',
+            'nombre', 'item', 'articulo', 'artículo',
+            'detalle', 'glosa', 'nombre producto',
+            'producto/descripcion', 'nombre del producto'
         ],
 
         # PARA core_producto.codigo (código único del producto)
         'codigo': [
             'barcode', 'bar code',
-            'codigo', 'código', 'cod',
+            'codigo', 'código', 'cod', 'cod.',
+            'codigo prov',  # ✅ Provefarma usa "CÓDIGO PROV"
             'sku', 'ean', 'upc',
-            'code', 'id producto'
+            'code', 'id producto', 'id',
+            'codigo producto', 'código producto',
+            'nro', 'numero', 'número'
         ],
 
         # PARA ofertas_laboratorio.precio_normal (precio sin descuento)
         'precio_normal': [
             'precio', 'precios',
             'precio normal', 'precio lista',
-            'pvp', 'precio venta publico',
-            'valor', 'precio unitario',
-            'total neto', 'neto'
+            'pvp', 'precio venta publico', 'p.v.p',
+            'valor', 'precio unitario', 'precio unidad',
+            'total neto', 'neto',
+            'precio sin descuento', 'precio anterior',
+            'precio publico', 'precio público'
         ],
 
         # PARA ofertas_laboratorio.precio_oferta (precio con descuento)
         'precio_oferta': [
-            'oferta', 'ofertas',
             'precio oferta', 'precio promocion', 'precio promoción',
             'precio promo', 'promo',
-            'precio especial', 'precio descuento'
+            'precio especial', 'precio descuento',
+            'precio con descuento', 'precio final',
+            'precio neto', 'precio oferta neto',
+            'precio tramo',  # ✅ Provefarma usa "PRECIO TRAMO 2"
+            'total neto'  # ✅ Provefarma también usa "TOTAL NETO"
         ],
 
         # PARA ofertas_laboratorio.descuento (% de descuento)
         'descuento': [
             '%desc', '% desc', '%descuento', '% descuento',
-            'desc', 'descuento', 'dto',
-            '%', 'porcentaje', 'pct'
+            'desc', 'descuento', 'dto', 'dcto',
+            '%', 'porcentaje', 'pct',
+            'descto', 'dsct', 'desc.'
         ],
 
         # PARA ofertas_laboratorio.laboratorio Y core_proveedor.nombre
         'laboratorio': [
-            'laboratorio', 'laboratorios', 'lab',
-            'proveedor', 'proveedores',
-            'marca', 'fabricante'
+            'laboratorio', 'laboratorios', 'lab', 'lab.',
+            'proveedor', 'proveedores', 'prov',
+            'marca', 'fabricante',
+            'laboratorio fabricante', 'fabricante/laboratorio'
         ],
 
         # PARA ofertas_laboratorio.fecha_fin (vencimiento de la oferta)
@@ -79,14 +92,16 @@ class ExcelOfferParser:
             'vigencia', 'vigente hasta',
             'valido hasta', 'válido hasta',
             'hasta', 'fecha', 'fecha fin',
-            'fecha vencimiento', 'fecha vigencia'
+            'fecha vencimiento', 'fecha vigencia',
+            'fecha termino', 'fecha término'
         ],
 
         # PARA core_producto.descripcion (composición del medicamento)
         'principio_activo': [
-            'principio activo', 'principio', 'pa',
+            'principio activo', 'principio', 'pa', 'p.a',
             'activo', 'componente', 'composicion', 'composición',
-            'formula', 'fórmula', 'ingrediente activo'
+            'formula', 'fórmula', 'ingrediente activo',
+            'compuesto', 'sustancia activa'
         ]
     }
 
@@ -330,6 +345,7 @@ class ExcelOfferParser:
         known_providers = {
             'mediven': 'Mediven',
             'socofar': 'Socofar',
+            'provefarma': 'Provefarma',  # ✅ Agregado Provefarma
             'labchile': 'LabChile',
             'lab chile': 'LabChile',
             'cofasa': 'Cofasa',
@@ -375,6 +391,14 @@ class ExcelOfferParser:
             # Extraer fecha del email (fecha de inicio)
             self.fecha_email = self._extract_email_date()
             logger.info(f"📧 Email recibido: {self.fecha_email}")
+
+            # ✅ DETECCIÓN DE PROVEFARMA: Usar parser especializado
+            if 'provefarma' in self.filename.lower():
+                logger.info(f"🏥 Archivo Provefarma detectado, usando parser especializado")
+                from core.parsers.provefarma_parser import ProvefarmaParser
+                parser = ProvefarmaParser(self.file_data, self.filename, self.metadata)
+                self.offers = parser.parse()
+                return self.offers
 
             # Detectar el tipo de archivo y usar el engine correcto
             file_ext = os.path.splitext(self.filename.lower())[1]
@@ -537,12 +561,27 @@ class ExcelOfferParser:
             raise
 
     def _detect_columns(self):
+        """Detecta columnas del Excel y las mapea a campos de la BD"""
         column_map = {}
+
+        # Log de columnas disponibles
+        logger.info(f"📋 Columnas disponibles en Excel: {list(self.df.columns)}")
+
         for key, variations in self.COLUMN_MAPPINGS.items():
             for col in self.df.columns:
                 if any(var in col for var in variations):
                     column_map[key] = col
+                    logger.info(f"  ✓ Detectado '{key}' -> '{col}'")
                     break
+
+        # Log de columnas NO detectadas
+        missing = [k for k in ['producto', 'codigo', 'laboratorio'] if k not in column_map]
+        if missing:
+            logger.warning(f"⚠️ Columnas NO detectadas: {missing}")
+
+        # Log del mapeo final
+        logger.info(f"🗺️ Mapeo de columnas: {column_map}")
+
         return column_map
 
     def _extract_offers_with_global_info(self, column_map):
@@ -570,6 +609,29 @@ class ExcelOfferParser:
                 codigo = str(row.get(column_map.get('codigo', ''), '')).strip()
                 if codigo and codigo.lower() in ['nan', 'none', '']:
                     codigo = None
+
+                # ⚠️ VALIDACIÓN: Skip filas que parecen ser headers de categoría
+                # Ejemplo: "BIENESTAR OCTUBRE 2025" sin código ni precios
+                # Solo skip si cumple TODO lo siguiente:
+                # 1. No tiene código
+                # 2. No tiene precio normal NI precio oferta
+                # 3. El nombre es todo mayúsculas con un patrón de categoría
+                if not codigo:
+                    # Verificar si tiene precios válidos
+                    precio_test_normal = self._parse_price(row.get(column_map.get('precio_normal', '')))
+                    precio_test_oferta = self._parse_price(row.get(column_map.get('precio_oferta', '')))
+
+                    # Si no hay precios Y el nombre parece un header de categoría
+                    if precio_test_normal <= 0 and precio_test_oferta <= 0:
+                        # Patrón de header: Todo mayúsculas + mes/año
+                        if producto.isupper() and any(mes in producto for mes in ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']):
+                            logger.info(f"⏭️ Skipping category header: '{producto}'")
+                            continue
+
+                    # Si no hay código pero SÍ hay precios, generar código automático
+                    if not codigo and (precio_test_normal > 0 or precio_test_oferta > 0):
+                        codigo = f"AUTO-{idx}-{producto[:10].replace(' ', '-').upper()}"
+                        logger.info(f"⚠️ Producto sin código, generando automático: {codigo}")
 
                 # Principio activo (opcional)
                 principio_activo = ''

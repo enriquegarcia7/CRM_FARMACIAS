@@ -64,14 +64,16 @@ const SeasonalDemand = () => {
   };
 
   const chartData = predicciones?.predicciones?.map(p => ({
-    mes: p.mes_nombre.substring(0, 3),
+    mes: p.mes_nombre?.substring(0, 3) || 'N/A',
     prediccion: p.prediccion,
     mes_numero: p.mes
   })) || [];
 
-  const mesMayorDemanda = chartData.reduce((max, current) => 
-    current.prediccion > max.prediccion ? current : max
-  , { prediccion: 0, mes: '' });
+  const mesMayorDemanda = (chartData && chartData.length > 0)
+    ? chartData.reduce((max, current) =>
+        current.prediccion > max.prediccion ? current : max
+      , { prediccion: 0, mes: '' })
+    : { prediccion: 0, mes: 'N/A' };
 
   const promedio = predicciones ? 
     predicciones.total_anual_proyectado / 12 : 0;
