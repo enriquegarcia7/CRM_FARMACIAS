@@ -52,7 +52,7 @@ class TransaccionViewSet(viewsets.ModelViewSet):
 
 
 class ProductoViewSet(viewsets.ModelViewSet):
-    queryset = Producto.objects.select_related('proveedor').all()
+    queryset = Producto.objects.select_related('proveedor_principal', 'categoria').all()
     serializer_class = ProductoSerializer
     pagination_class = OfertasPagination  # 50 productos por página
 
@@ -60,8 +60,8 @@ class ProductoViewSet(viewsets.ModelViewSet):
         """Query optimizado con filtros"""
         queryset = super().get_queryset()
 
-        # FILTRO PRINCIPAL: Solo productos en inventario actual (del último Excel)
-        queryset = queryset.filter(en_inventario_actual=True)
+        # FILTRO PRINCIPAL: Solo productos activos
+        queryset = queryset.filter(activo=True)
 
         # Filtro de búsqueda
         search = self.request.query_params.get('search', None)
@@ -70,7 +70,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
                 Q(codigo__icontains=search) |
                 Q(nombre__icontains=search) |
                 Q(descripcion__icontains=search) |
-                Q(categoria__icontains=search)
+                Q(categoria__nombre__icontains=search)
             )
 
         # Filtro de stock
@@ -107,15 +107,14 @@ class ProductoViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='ultima-carga')
     def ultima_carga(self, request):
         """Obtiene la fecha y hora de la última carga de inventario"""
-        # Buscar el producto con la fecha de última carga más reciente
+        # Buscar el producto más reciente (por fecha de registro)
         producto_reciente = Producto.objects.filter(
-            en_inventario_actual=True,
-            fecha_ultima_carga__isnull=False
-        ).order_by('-fecha_ultima_carga').first()
+            activo=True
+        ).order_by('-fecha_registro').first()
 
-        if producto_reciente and producto_reciente.fecha_ultima_carga:
+        if producto_reciente:
             return Response({
-                'fecha_ultima_carga': producto_reciente.fecha_ultima_carga.isoformat(),
+                'fecha_ultima_carga': producto_reciente.fecha_registro.isoformat(),
                 'tiene_inventario': True
             })
         else:
@@ -188,14 +187,16 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
 
         # Query optimizado con select_related para reducir queries
         ofertas = OfertaLaboratorio.objects.select_related(
-            'producto',
-            'producto__proveedor'
+            'producto_catalogo',
+            'producto_catalogo__proveedor',
+            'laboratorio'
         ).only(
             # Solo campos necesarios para reducir payload
-            'id', 'laboratorio', 'precio_normal', 'precio_oferta',
+            'id', 'precio_normal', 'precio_oferta',
             'descuento', 'fecha_inicio', 'fecha_fin', 'activa', 'created_at',
-            'producto__id', 'producto__codigo', 'producto__nombre',
-            'producto__descripcion', 'producto__proveedor__nombre'
+            'producto_catalogo__id', 'producto_catalogo__codigo', 'producto_catalogo__nombre',
+            'producto_catalogo__descripcion', 'producto_catalogo__proveedor__nombre',
+            'laboratorio__id', 'laboratorio__nombre'
         )
 
         # Filtros
@@ -205,18 +206,18 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
             ofertas = ofertas.filter(activa=True, fecha_fin__gte=today)
 
         if laboratorio:
-            ofertas = ofertas.filter(laboratorio__icontains=laboratorio)
+            ofertas = ofertas.filter(laboratorio__nombre__icontains=laboratorio)
 
         if search:
             ofertas = ofertas.filter(
-                Q(producto__codigo__icontains=search) |
-                Q(producto__nombre__icontains=search) |
-                Q(laboratorio__icontains=search) |
-                Q(producto__proveedor__nombre__icontains=search)
+                Q(producto_catalogo__codigo__icontains=search) |
+                Q(producto_catalogo__nombre__icontains=search) |
+                Q(laboratorio__nombre__icontains=search) |
+                Q(producto_catalogo__proveedor__nombre__icontains=search)
             )
 
         # Ordenar por laboratorio y producto
-        ofertas = ofertas.order_by('laboratorio', 'producto__nombre')
+        ofertas = ofertas.order_by('laboratorio__nombre', 'producto_catalogo__nombre')
 
         # Aplicar paginación backend
         paginator = OfertasPagination()
@@ -300,8 +301,67 @@ class SugerenciaCompraViewSet(viewsets.ModelViewSet):
 
 
 class VentaViewSet(viewsets.ModelViewSet):
-    queryset = Venta.objects.all()
+    queryset = Venta.objects.select_related('cliente').prefetch_related('detalles__producto').all()
     serializer_class = VentaSerializer
+    pagination_class = OfertasPagination  # 50 ventas por página
+
+    @action(detail=False, methods=['get'], url_path='ultima-carga')
+    def ultima_carga(self, request):
+        """Obtiene la fecha y hora de la última carga de ventas"""
+        venta_reciente = Venta.objects.filter(
+            estado='completada'
+        ).order_by('-fecha').first()
+
+        if venta_reciente:
+            return Response({
+                'fecha_ultima_carga': venta_reciente.fecha.isoformat(),
+                'tiene_ventas': True
+            })
+        else:
+            return Response({
+                'fecha_ultima_carga': None,
+                'tiene_ventas': False
+            })
+
+    @action(detail=False, methods=['post'])
+    def cargar_excel(self, request):
+        """Cargar ventas desde archivo Excel"""
+        archivo = request.FILES.get('archivo')
+
+        if not archivo:
+            return Response(
+                {'error': 'No se proporcionó archivo'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validar extensión
+        if not archivo.name.endswith(('.xlsx', '.xls', '.XLS', '.XLSX')):
+            return Response(
+                {'error': 'El archivo debe ser Excel (.xlsx o .xls)'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            from core.parsers.sales_excel_parser import SalesExcelParser
+
+            parser = SalesExcelParser(archivo)
+            result = parser.parse_and_load()
+
+            return Response({
+                'message': 'Archivo de ventas procesado correctamente',
+                'ventas_insertadas': result.get('ventas_insertadas', 0),
+                'ventas_duplicadas': result.get('ventas_duplicadas', 0),
+                'detalles_insertados': result.get('detalles_insertados', 0),
+                'clientes_creados': result.get('clientes_creados', 0),
+                'productos_no_encontrados': result.get('productos_no_encontrados', 0),
+                'errores': result.get('errores', [])[:20]  # Mostrar solo primeros 20 errores
+            })
+
+        except Exception as e:
+            return Response(
+                {'error': f'Error procesando archivo: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class DashboardViewSet(viewsets.GenericViewSet):
