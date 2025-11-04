@@ -29,5 +29,5 @@ RUN mkdir -p /app/staticfiles
 # Exponer puerto
 EXPOSE 8000
 
-# Script de inicio
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "SmartPharm.wsgi:application"]
+# Script de inicio con timeout extendido para procesamiento de archivos grandes
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "--timeout", "300", "--graceful-timeout", "300", "SmartPharm.wsgi:application"]

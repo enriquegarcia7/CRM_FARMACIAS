@@ -10,7 +10,8 @@ import {
   Menu,
   X,
   LogOut,
-  CheckCircle
+  CheckCircle,
+  TrendingUp
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
@@ -32,6 +33,8 @@ const Layout = () => {
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/inventario', icon: Package, label: 'Inventario' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
+    { path: '/ventas', icon: TrendingUp, label: 'Ventas' },
+    { path: '/ofertas-laboratorio', icon: Tag, label: 'Ofertas' },
     { path: '/demanda-estacional', icon: TrendingUp, label: 'Demanda Estacional' },  // ← NUEVO
     { path: '/sugerencias', icon: ShoppingCart, label: 'Sugerencias de Compra' },
     { path: '/etl', icon: Database, label: 'ETL' },
