@@ -35,6 +35,7 @@ urlpatterns = [
     path('', redirect_to_admin),
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/', include('core.urls')),
 
     # ETL endpoints
     path('api/etl/run/', run_etl_manual, name='run_etl'),
@@ -53,4 +54,5 @@ urlpatterns = [
     path('api/auth/callback', login_callback, name='login_callback'),
     path('api/auth/session/', check_session, name='check_session'),
     path('api/auth/logout/', logout, name='logout'),
+    path('api/', include('core.urls')),
 ]

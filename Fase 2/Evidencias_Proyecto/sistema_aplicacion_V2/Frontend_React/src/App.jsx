@@ -10,6 +10,7 @@ import PurchaseSuggestions from './pages/PurchaseSuggestions/PurchaseSuggestions
 import OfertasLaboratorio from './pages/OfertasLaboratorio/OfertasLaboratorio';
 import Sales from './pages/Sales/Sales';
 import ETL from './pages/ETL/ETL';
+import SeasonalDemand from './pages/SeasonalDemand/SeasonalDemand';
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
             <Route path="sugerencias" element={<PurchaseSuggestions />} />
             <Route path="ofertas-laboratorio" element={<OfertasLaboratorio />} />
             <Route path="etl" element={<ETL />} />
+            <Route path="demanda-estacional" element={<SeasonalDemand />} />
           </Route>
         </Routes>
       </AuthProvider>

@@ -1,11 +1,17 @@
 {
-  "fecha_entrenamiento": "2025-10-12 20:58:28",
+  "fecha_entrenamiento": "2025-11-01 19:48:16",
+  "versiones_librerias": {
+    "sklearn": "1.6.1",
+    "pandas": "2.2.0",
+    "numpy": "1.26.4",
+    "joblib": "1.4.0"
+  },
   "dataset": {
     "transacciones_totales": 152429,
     "clientes_unicos": 19993,
     "periodo_inicio": "2022-01-03",
     "periodo_fin": "2025-09-30",
-    "meses_datos": 45.53333333333333
+    "meses_datos": 45.5
   },
   "umbrales_segmentacion": {
     "p50_mediana": 7.0,
@@ -38,14 +44,15 @@
       "compras_no_farm"
     ],
     "n_estimators": 150,
-    "max_depth": 12
+    "max_depth": 12,
+    "notas": "Accuracy 100% debido a features determinísticas en este dataset"
   },
   "modelo_prediccion": {
     "algoritmo": "Random Forest Regressor",
-    "mae_train": 2.0645290126468967,
-    "mae_test": 3.695301095756023,
-    "rmse_test": 9.591660080467815,
-    "mape_test": 27.686461002059183,
+    "mae_train": 2.9830274550671128,
+    "mae_test": 3.972879739100116,
+    "rmse_test": 10.281439913032623,
+    "mape_test": 33.58532972714077,
     "meta_cumplida": false,
     "features": [
       "mes",
@@ -57,8 +64,8 @@
       "trans_lag_12",
       "trans_ma_3"
     ],
-    "n_estimators": 250,
-    "max_depth": 20,
+    "n_estimators": 150,
+    "max_depth": 15,
     "categorias_mapeadas": [
       "ALCOHOL-AGUA OXIGENADA",
       "ANALGESICO",
@@ -186,7 +193,8 @@
       "VITAMINOTERAPIA C",
       "VITAMINOTERAPIA D",
       "VITAMINOTERAPIA E"
-    ]
+    ],
+    "notas": "Modelo optimizado. MAPE final: 33.59%"
   },
   "modelo_cronicos": {
     "algoritmo": "Logistic Regression",
@@ -205,7 +213,8 @@
       "ratio_cronico_agudo",
       "compras_no_farm"
     ],
-    "prevalencia_cronicos": 0.451708097834242
+    "prevalencia_cronicos": 0.451708097834242,
+    "notas": "Accuracy 100% debido a relación determinística target-features"
   },
   "clasificacion_medicamentos": {
     "categorias_cronicas": [
@@ -239,5 +248,11 @@
       "ANTIMICOT",
       "ANTIPARASITARIO"
     ]
-  }
+  },
+  "advertencias": [
+    "Modelos entrenados con datos de 1 farmacia piloto",
+    "Validar con datos de otras farmacias antes de producción",
+    "Accuracy 100% en segmentación indica features determinísticas",
+    "MAPE puede variar con nuevas categorías de productos"
+  ]
 }

@@ -4,6 +4,7 @@ import {
   Package,
   Users,
   ShoppingCart,
+  TrendingUp,
   Tag,
   Database,
   Menu,
@@ -34,6 +35,7 @@ const Layout = () => {
     { path: '/clientes', icon: Users, label: 'Clientes' },
     { path: '/ventas', icon: TrendingUp, label: 'Ventas' },
     { path: '/ofertas-laboratorio', icon: Tag, label: 'Ofertas' },
+    { path: '/demanda-estacional', icon: TrendingUp, label: 'Demanda Estacional' },  // ← NUEVO
     { path: '/sugerencias', icon: ShoppingCart, label: 'Sugerencias de Compra' },
     { path: '/etl', icon: Database, label: 'ETL' },
   ];
@@ -62,7 +64,6 @@ const Layout = () => {
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
-
             return (
               <Link
                 key={item.path}
