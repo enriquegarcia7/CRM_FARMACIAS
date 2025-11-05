@@ -173,7 +173,9 @@ const Inventory = () => {
   };
 
   const getStockStatus = (producto) => {
-    const porcentaje = producto.stock_minimo > 0 ? (producto.stock_actual / producto.stock_minimo) * 100 : 100;
+    // Usar stock mínimo dinámico si está disponible, sino usar el estático
+    const stockMinimo = producto.stock_minimo_dinamico || producto.stock_minimo;
+    const porcentaje = stockMinimo > 0 ? (producto.stock_actual / stockMinimo) * 100 : 100;
     if (porcentaje < 50) return { color: 'text-red-600 bg-red-100', label: 'Crítico' };
     if (porcentaje < 100) return { color: 'text-yellow-600 bg-yellow-100', label: 'Bajo' };
     return { color: 'text-green-600 bg-green-100', label: 'Normal' };
@@ -312,7 +314,10 @@ const Inventory = () => {
                   Stock
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock Mín.
+                  Stock Mín. (Dinámico)
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                  Demanda Diaria
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Estado
@@ -333,8 +338,31 @@ const Inventory = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {producto.stock_actual}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                      {producto.stock_minimo}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-blue-600">
+                          {producto.stock_minimo_dinamico || producto.stock_minimo}
+                        </span>
+                        {producto.stock_minimo_dinamico && producto.stock_minimo_dinamico !== producto.stock_minimo && (
+                          <span className="text-xs text-gray-400">
+                            (fijo: {producto.stock_minimo})
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      {producto.metricas_stock ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium">
+                            {producto.metricas_stock.demanda_promedio_diaria.toFixed(1)} u/día
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {Math.round(producto.metricas_stock.dias_cobertura)} días cobertura
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">Sin datos</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span

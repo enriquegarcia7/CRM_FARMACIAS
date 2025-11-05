@@ -28,6 +28,7 @@ class OfertasPagination(PageNumberPagination):
 class ClienteViewSet(viewsets.ModelViewSet):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
+    pagination_class = OfertasPagination  # 50 clientes por página
 
     @action(detail=False, methods=['get'])
     def frecuentes(self, request):
@@ -38,6 +39,32 @@ class ClienteViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(clientes, many=True)
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        """Obtiene estadísticas globales de clientes"""
+        total_clientes = Cliente.objects.count()
+
+        # Anotar todos los clientes con su total de compras
+        clientes_anotados = Cliente.objects.annotate(
+            total_compras=Count('ventas', filter=Q(ventas__estado='completada'))
+        )
+
+        # Clientes frecuentes (>= 5 compras)
+        clientes_frecuentes = clientes_anotados.filter(total_compras__gte=5).count()
+
+        # Clientes normales (< 5 compras)
+        clientes_normales = clientes_anotados.filter(total_compras__lt=5).count()
+
+        # Elegibles para ofertas (frecuentes con >= 5 compras)
+        elegibles_ofertas = clientes_anotados.filter(total_compras__gte=5).count()
+
+        return Response({
+            'total_clientes': total_clientes,
+            'clientes_frecuentes': clientes_frecuentes,
+            'clientes_normales': clientes_normales,
+            'elegibles_ofertas': elegibles_ofertas
+        })
 
 
 class TransaccionViewSet(viewsets.ModelViewSet):
@@ -388,12 +415,26 @@ class DashboardViewSet(viewsets.GenericViewSet):
             total=Sum('total')
         )['total'] or 0
 
-        # Ventas del mes actual
-        mes_actual = timezone.now().replace(day=1)
-        ventas_mes = Venta.objects.filter(
-            estado='completada',
-            fecha__gte=mes_actual
-        ).aggregate(total=Sum('total'))['total'] or 0
+        # Ventas del mes más reciente (último mes con ventas)
+        # Obtener la venta más reciente
+        venta_reciente = Venta.objects.filter(estado='completada').order_by('-fecha').first()
+
+        if venta_reciente:
+            # Calcular el primer día del mes de esa venta
+            mes_reciente = venta_reciente.fecha.replace(day=1)
+            # Calcular el último día del mes
+            if mes_reciente.month == 12:
+                fin_mes = mes_reciente.replace(year=mes_reciente.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                fin_mes = mes_reciente.replace(month=mes_reciente.month + 1, day=1) - timedelta(days=1)
+
+            ventas_mes = Venta.objects.filter(
+                estado='completada',
+                fecha__gte=mes_reciente,
+                fecha__lte=fin_mes
+            ).aggregate(total=Sum('total'))['total'] or 0
+        else:
+            ventas_mes = 0
 
         # Productos en stock
         productos_stock = Producto.objects.filter(activo=True).count()

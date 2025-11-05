@@ -15,36 +15,39 @@ class SalesExcelParser:
     """
     Parser para archivos Excel de ventas históricas.
 
-    Columnas del Excel:
-    - TIPO DOCUMENTO
-    - NUMERO
-    - FECHA
+    Columnas requeridas del Excel:
+    - RUT: RUT del cliente (identificador ÚNICO del cliente) ⭐ IMPORTANTE
+           Formatos aceptados: "12.345.678-9", "12345678-9", "123456789"
+           El parser normalizará automáticamente el formato
+    - FECHA: Fecha de la venta
+    - CODIGO: Código del producto
+    - PRODUCTO: Nombre/descripción del producto
+    - CANTIDAD: Cantidad vendida
+    - PRECIO: Precio unitario
+
+    Columnas opcionales:
+    - TIPO DOCUMENTO: Tipo de documento (Factura, Boleta, etc)
+    - NUMERO DOCUMENTO: Número de documento de venta
+    - NOMBRE CLIENTE: Nombre del cliente
+    - CORREO: Correo electrónico del cliente
+    - CLIENTE_ID: ID de transacción (NO es identificador del cliente)
     - FECHA VENCIMIENTO
-    - CLIENTE RUT
     - ORDEN COMPRA
     - VENDEDOR
     - DISTRIBUIDOR
     - SUCURSAL
     - CENTRO COSTO
-    - CODIGO
-    - PRODUCTO
-    - CANTIDAD
-    - PRECIO UNITARIO
     - DESCUENTO
     - NETO
     - CUENTA
     - FAMILIA
 
-    TODAS se cargan en la BD, pero en la vista solo se muestran:
-    - NOMBRE CLIENTE (del modelo Cliente via RUT)
-    - RUT (CLIENTE RUT)
-    - FECHA COMPRA (FECHA)
-    - CODIGO
-    - PRODUCTO
-    - CANTIDAD
-    - PRECIO UNITARIO
-    - NETO
-    - TOTAL (PRECIO UNITARIO * CANTIDAD)
+    IMPORTANTE:
+    - RUT es el identificador ÚNICO del cliente
+    - CLIENTE_ID (si existe) es solo un ID de transacción/fila, NO del cliente
+    - Si el Excel tiene ambas columnas, se usa RUT para agrupar clientes
+
+    Este formato está diseñado para análisis predictivo de demanda estacional.
     """
 
     def __init__(self, file_obj):
@@ -81,14 +84,19 @@ class SalesExcelParser:
             logger.info(f"📋 Columnas después del mapeo: {list(df.columns)}")
 
             # Validar columnas requeridas después del mapeo
-            required_cols = ['FECHA', 'RUT', 'PRODUCTO', 'CANTIDAD', 'PRECIO_UNITARIO']
+            # Flexibilidad: CLIENTE_ID puede ser RUT o cualquier identificador
+            required_cols = ['FECHA', 'PRODUCTO', 'CANTIDAD', 'PRECIO_UNITARIO']
             missing_cols = [col for col in required_cols if col not in df.columns]
+
+            # Validar que haya al menos un identificador de cliente
+            if 'CLIENTE_ID' not in df.columns and 'RUT' not in df.columns:
+                missing_cols.append('CLIENTE_ID o RUT')
 
             if missing_cols:
                 raise ValueError(
                     f"❌ No se pudieron mapear las columnas requeridas: {missing_cols}\n"
                     f"📋 Columnas disponibles: {list(df.columns)}\n"
-                    f"💡 Verifica que el Excel tenga fecha, RUT/cliente, producto, cantidad y precio"
+                    f"💡 Columnas requeridas: TIPO DOCUMENTO, NUMERO DOCUMENTO, FECHA, NOMBRE CLIENTE, CORREO, CODIGO, PRODUCTO, CANTIDAD, PRECIO, CLIENTE_ID"
                 )
 
             # Cargar ventas
@@ -124,9 +132,14 @@ class SalesExcelParser:
         used_columns = set()  # Para evitar duplicados
 
         # Mapeo flexible de columnas (en orden de prioridad)
+        # IMPORTANTE: RUT es el identificador ÚNICO del cliente
+        # CLIENTE_ID puede ser un ID de transacción o fila, NO del cliente
         mappings = {
-            'RUT': ['CLIENTE RUT', 'CLIENTE_RUT', 'RUT'],
-            'NUMERO': ['NÚMERO', 'NUMERO', 'NRO', 'N°', 'NUMERO DOC', 'NUMERO DOCUMENTO'],
+            'RUT': ['RUT', 'CLIENTE RUT', 'CLIENTE_RUT', 'RUT CLIENTE'],
+            'CLIENTE_ID': ['CLIENTE_ID', 'CLIENTE ID', 'ID CLIENTE', 'ID_CLIENTE'],
+            'NOMBRE_CLIENTE': ['NOMBRE CLIENTE', 'NOMBRE_CLIENTE', 'NOMBRE', 'CLIENTE'],
+            'CORREO': ['CORREO', 'EMAIL', 'E-MAIL', 'CORREO ELECTRONICO', 'CORREO ELECTRÓNICO'],
+            'NUMERO': ['NUMERO DOCUMENTO', 'NÚMERO DOCUMENTO', 'NUMERO_DOCUMENTO', 'NÚMERO', 'NUMERO', 'NRO', 'N°', 'NUMERO DOC'],
             'TIPO_DOCUMENTO': ['TIPO DOCUMENTO', 'TIPO_DOCUMENTO', 'TIPO'],
             'FECHA': ['FECHA'],
             'FECHA_VENCIMIENTO': ['FECHA VENCIMIENTO', 'FECHA_VENCIMIENTO', 'VENCIMIENTO'],
@@ -136,9 +149,9 @@ class SalesExcelParser:
             'SUCURSAL': ['SUCURSAL'],
             'CENTRO_COSTO': ['CENTRO COSTO', 'CENTRO_COSTO'],
             'CODIGO': ['CODIGO', 'CÓDIGO', 'COD', 'SKU'],
-            'PRODUCTO': ['DESCRIPCION', 'DESCRIPCIÓN', 'PRODUCTO'],
+            'PRODUCTO': ['PRODUCTO', 'DESCRIPCION', 'DESCRIPCIÓN'],
             'CANTIDAD': ['CANTIDAD', 'CANT', 'QTY'],
-            'PRECIO_UNITARIO': ['PRECIO UNITARIO', 'PRECIO_UNITARIO', 'PRECIO'],
+            'PRECIO_UNITARIO': ['PRECIO', 'PRECIO UNITARIO', 'PRECIO_UNITARIO'],
             'DESCUENTO': ['DESCUENTO'],
             'NETO': ['NETO'],
             'CUENTA': ['CUENTA'],
@@ -177,16 +190,32 @@ class SalesExcelParser:
     @transaction.atomic
     def _load_sales(self, df):
         """
-        Carga ventas en la base de datos.
+        Carga ventas en la base de datos con procesamiento optimizado por lotes.
 
-        ESTRATEGIA:
-        1. Agrupar por FECHA + CLIENTE RUT + NUMERO (si existe) para crear Ventas
-        2. Cada fila del Excel es un DetalleVenta
-        3. Guardar TODOS los campos del Excel en campos adicionales
+        ESTRATEGIA OPTIMIZADA:
+        1. Pre-cargar todos los productos y clientes en memoria (1 consulta cada uno)
+        2. Crear clientes faltantes en lote (bulk_create)
+        3. Agrupar ventas por FECHA + CLIENTE RUT + NUMERO
+        4. Crear ventas en lotes
+        5. Crear detalles en lotes
         """
-        # Agrupar ventas por fecha, cliente y número de documento
-        ventas_dict = {}  # key: (fecha, cliente_rut, numero_doc) -> lista de items
+        logger.info(f"🚀 Iniciando procesamiento optimizado de {len(df)} filas")
 
+        # 1. PRE-CARGAR TODOS LOS PRODUCTOS EN MEMORIA (1 consulta)
+        logger.info("📦 Cargando productos en memoria...")
+        productos_dict = {p.codigo: p for p in Producto.objects.all()}
+        logger.info(f"✅ {len(productos_dict)} productos cargados en memoria")
+
+        # 2. PRE-CARGAR TODOS LOS CLIENTES EN MEMORIA (1 consulta)
+        logger.info("👥 Cargando clientes en memoria...")
+        clientes_dict = {c.rut: c for c in Cliente.objects.all()}
+        logger.info(f"✅ {len(clientes_dict)} clientes cargados en memoria")
+
+        # 3. PROCESAR FILAS Y AGRUPAR VENTAS
+        ventas_dict = {}  # key: (fecha, cliente_rut, numero_doc) -> lista de items
+        clientes_a_crear = {}  # RUT -> datos del cliente
+
+        logger.info("📝 Procesando filas del Excel...")
         for index, row in df.iterrows():
             try:
                 # Extraer fecha
@@ -195,14 +224,29 @@ class SalesExcelParser:
                     self.stats['errores'].append(f"Fila {index + 2}: Fecha inválida")
                     continue
 
-                # Extraer RUT cliente
-                cliente_rut = self._clean_string(row.get('RUT', ''))
+                # Extraer identificador del cliente (priorizar RUT sobre CLIENTE_ID)
+                # RUT es el identificador ÚNICO del cliente
+                # IMPORTANTE: Normalizar RUT chileno (eliminar puntos y guión)
+                cliente_rut = self._normalize_rut(row.get('RUT', ''))
                 if not cliente_rut:
-                    self.stats['errores'].append(f"Fila {index + 2}: RUT cliente vacío")
+                    # Si no hay RUT, intentar con CLIENTE_ID como fallback
+                    cliente_rut = self._normalize_rut(row.get('CLIENTE_ID', ''))
+
+                if not cliente_rut:
+                    self.stats['errores'].append(f"Fila {index + 2}: RUT o identificador de cliente vacío")
                     continue
 
-                # Obtener o crear cliente
-                cliente = self._get_or_create_cliente(cliente_rut)
+                # Extraer nombre y correo del cliente (si existen)
+                nombre_cliente = self._clean_string(row.get('NOMBRE_CLIENTE', ''))
+                correo_cliente = self._clean_string(row.get('CORREO', ''))
+
+                # Verificar si el cliente ya existe en memoria o en la lista de creación
+                if cliente_rut not in clientes_dict and cliente_rut not in clientes_a_crear:
+                    clientes_a_crear[cliente_rut] = {
+                        'rut': cliente_rut,
+                        'nombre': nombre_cliente if nombre_cliente else f'Cliente {cliente_rut}',
+                        'correo': correo_cliente if correo_cliente else None
+                    }
 
                 # Extraer código producto
                 codigo_producto = self._clean_string(row.get('CODIGO', ''))
@@ -210,8 +254,8 @@ class SalesExcelParser:
                     self.stats['errores'].append(f"Fila {index + 2}: Código de producto vacío")
                     continue
 
-                # Buscar producto en inventario
-                producto = Producto.objects.filter(codigo=codigo_producto).first()
+                # Buscar producto en el diccionario de memoria (sin consulta DB)
+                producto = productos_dict.get(codigo_producto)
                 if not producto:
                     self.stats['productos_no_encontrados'] += 1
                     self.stats['errores'].append(
@@ -238,7 +282,7 @@ class SalesExcelParser:
                 # Número de documento (para agrupar)
                 numero_doc = self._clean_string(row.get('NUMERO', ''))
 
-                # Agrupar por fecha, cliente y número de documento
+                # Agrupar por fecha, cliente RUT y número de documento
                 key = (fecha.date(), cliente_rut, numero_doc)
                 if key not in ventas_dict:
                     ventas_dict[key] = {
@@ -275,76 +319,155 @@ class SalesExcelParser:
                 logger.error(f"❌ {error_msg}")
                 continue
 
-        # Crear ventas y detalles
+        logger.info(f"✅ {len(df)} filas procesadas, {len(ventas_dict)} ventas agrupadas")
+
+        # 4. CREAR CLIENTES FALTANTES EN LOTE (1 bulk_create)
+        if clientes_a_crear:
+            logger.info(f"👥 Creando {len(clientes_a_crear)} clientes nuevos...")
+            nuevos_clientes = []
+            for cliente_data in clientes_a_crear.values():
+                nuevos_clientes.append(Cliente(
+                    rut=cliente_data['rut'],
+                    nombre=cliente_data['nombre'],
+                    correo=cliente_data['correo'],
+                    telefono='',
+                    direccion=''
+                ))
+            try:
+                Cliente.objects.bulk_create(nuevos_clientes, ignore_conflicts=True)
+                self.stats['clientes_creados'] = len(nuevos_clientes)
+                # Actualizar diccionario de clientes
+                clientes_dict.update({c.rut: c for c in Cliente.objects.filter(rut__in=clientes_a_crear.keys())})
+                logger.info(f"✅ {len(nuevos_clientes)} clientes creados")
+            except Exception as e:
+                logger.error(f"❌ Error creando clientes en lote: {e}")
+
+        # 5. CREAR VENTAS Y DETALLES EN LOTES
+        logger.info(f"💳 Creando {len(ventas_dict)} ventas...")
+        ventas_a_crear = []
+        detalles_a_crear = []
+
         for (fecha, cliente_rut, numero_doc), venta_data in ventas_dict.items():
             try:
-                cliente = Cliente.objects.get(rut=cliente_rut)
+                cliente = clientes_dict.get(cliente_rut)
+
+                if not cliente:
+                    error_msg = f"Cliente con RUT {cliente_rut} no encontrado en diccionario"
+                    self.stats['errores'].append(error_msg)
+                    continue
 
                 # Generar hash único para detectar duplicados
                 hash_unico = self._generar_hash_venta(numero_doc, cliente_rut, fecha)
 
-                # Calcular total de la venta (PRECIO UNITARIO * CANTIDAD para cada item)
+                # Calcular total de la venta
                 total_venta = sum(
                     item['cantidad'] * item['precio_unitario']
                     for item in venta_data['items']
                 )
 
-                # Intentar crear venta (detecta duplicados por hash único)
-                try:
-                    venta = Venta.objects.create(
-                        numero=numero_doc if numero_doc else None,
-                        cliente=cliente,
-                        fecha=datetime.combine(fecha, datetime.min.time()),
-                        total=total_venta,
-                        metodo_pago='efectivo',
-                        estado='completada',
-                        hash_unico=hash_unico
-                    )
-                    self.stats['ventas_insertadas'] += 1
+                # Preparar venta para bulk_create
+                venta_obj = Venta(
+                    tipo_documento=venta_data['tipo_documento'] if venta_data['tipo_documento'] else None,
+                    numero=numero_doc if numero_doc else None,
+                    cliente=cliente,
+                    fecha=datetime.combine(fecha, datetime.min.time()),
+                    total=total_venta,
+                    metodo_pago='efectivo',
+                    estado='completada',
+                    hash_unico=hash_unico
+                )
+                ventas_a_crear.append((venta_obj, venta_data['items']))
 
-                    # Crear detalles solo si la venta es nueva
-                    for item in venta_data['items']:
-                        subtotal = item['cantidad'] * item['precio_unitario']
-
-                        DetalleVenta.objects.create(
-                            venta=venta,
-                            producto=item['producto'],
-                            cantidad=item['cantidad'],
-                            precio_unitario=item['precio_unitario'],
-                            subtotal=subtotal
-                        )
-                        self.stats['detalles_insertados'] += 1
-
-                    logger.debug(f"✅ Venta creada: {fecha} - {cliente.nombre} - ${total_venta} ({len(venta_data['items'])} items)")
-
-                except IntegrityError:
-                    # Venta duplicada - ya existe en la BD
-                    self.stats['ventas_duplicadas'] += 1
-                    logger.debug(f"⚠️ Venta duplicada omitida: {numero_doc} - {cliente_rut} - {fecha}")
-
-            except Cliente.DoesNotExist:
-                error_msg = f"Cliente con RUT {cliente_rut} no encontrado"
-                self.stats['errores'].append(error_msg)
-                logger.error(f"❌ {error_msg}")
             except Exception as e:
-                error_msg = f"Error creando venta {fecha} - {cliente_rut}: {str(e)}"
+                error_msg = f"Error preparando venta {fecha} - {cliente_rut}: {str(e)}"
                 self.stats['errores'].append(error_msg)
                 logger.error(f"❌ {error_msg}")
 
-    def _get_or_create_cliente(self, rut):
-        """Obtiene o crea un cliente desde el RUT"""
+        # 6. CREAR VENTAS EN LOTE (usando ignore_conflicts para duplicados)
+        logger.info(f"💾 Insertando {len(ventas_a_crear)} ventas en la BD...")
+        if ventas_a_crear:
+            try:
+                # Extraer solo los objetos Venta (sin los items)
+                ventas_objs = [v[0] for v in ventas_a_crear]
+                ventas_creadas = Venta.objects.bulk_create(ventas_objs, ignore_conflicts=True)
+
+                # Recuperar las ventas creadas para obtener sus IDs
+                hashes_creados = [v.hash_unico for v in ventas_objs if v.hash_unico]
+                ventas_bd = {v.hash_unico: v for v in Venta.objects.filter(hash_unico__in=hashes_creados)}
+
+                self.stats['ventas_insertadas'] = len(ventas_bd)
+                self.stats['ventas_duplicadas'] = len(ventas_a_crear) - len(ventas_bd)
+
+                logger.info(f"✅ {self.stats['ventas_insertadas']} ventas insertadas, {self.stats['ventas_duplicadas']} duplicadas omitidas")
+
+                # 7. CREAR DETALLES EN LOTE
+                logger.info(f"📝 Preparando detalles de venta...")
+                for venta_obj, items in ventas_a_crear:
+                    venta_bd = ventas_bd.get(venta_obj.hash_unico)
+                    if venta_bd:  # Solo crear detalles si la venta fue insertada
+                        for item in items:
+                            subtotal = item['cantidad'] * item['precio_unitario']
+                            detalles_a_crear.append(DetalleVenta(
+                                venta=venta_bd,
+                                producto=item['producto'],
+                                cantidad=item['cantidad'],
+                                precio_unitario=item['precio_unitario'],
+                                subtotal=subtotal
+                            ))
+
+                # Insertar detalles en lote
+                if detalles_a_crear:
+                    logger.info(f"💾 Insertando {len(detalles_a_crear)} detalles en la BD...")
+                    DetalleVenta.objects.bulk_create(detalles_a_crear, batch_size=5000)
+                    self.stats['detalles_insertados'] = len(detalles_a_crear)
+                    logger.info(f"✅ {len(detalles_a_crear)} detalles insertados")
+
+            except Exception as e:
+                error_msg = f"Error en bulk_create: {str(e)}"
+                self.stats['errores'].append(error_msg)
+                logger.error(f"❌ {error_msg}")
+                import traceback
+                traceback.print_exc()
+
+    def _get_or_create_cliente(self, cliente_id, nombre='', correo=''):
+        """
+        Obtiene o crea un cliente desde el ID (RUT).
+        Si el cliente existe, actualiza su nombre y correo si se proporcionaron.
+
+        Args:
+            cliente_id: RUT normalizado (sin puntos ni guión)
+            nombre: Nombre del cliente
+            correo: Correo del cliente
+        """
         try:
-            cliente = Cliente.objects.get(rut=rut)
+            cliente = Cliente.objects.get(rut=cliente_id)
+
+            # Actualizar nombre y correo si se proporcionaron y no están vacíos
+            actualizado = False
+            if nombre and cliente.nombre != nombre:
+                # Solo actualizar si el nombre actual es genérico o vacío
+                if cliente.nombre.startswith('Cliente ') or not cliente.nombre:
+                    cliente.nombre = nombre
+                    actualizado = True
+
+            if correo and (not cliente.correo or cliente.correo != correo):
+                cliente.correo = correo
+                actualizado = True
+
+            if actualizado:
+                cliente.save()
+                logger.debug(f"✅ Cliente actualizado: {cliente_id}")
+
         except Cliente.DoesNotExist:
             cliente = Cliente.objects.create(
-                rut=rut,
-                nombre=f'Cliente {rut}',
+                rut=cliente_id,
+                nombre=nombre if nombre else f'Cliente {cliente_id}',
                 telefono='',
-                correo=None,
+                correo=correo if correo else None,
                 direccion=''
             )
             self.stats['clientes_creados'] += 1
-            logger.debug(f"✅ Cliente creado: {rut}")
+            logger.debug(f"✅ Cliente creado: {cliente_id} - {nombre if nombre else 'sin nombre'}")
 
         return cliente
 
@@ -380,6 +503,28 @@ class SalesExcelParser:
         if pd.isna(value):
             return ''
         return str(value).strip()
+
+    def _normalize_rut(self, rut_value):
+        """
+        Normaliza RUT chileno eliminando puntos y guiones.
+        Ejemplos:
+        - "10.041.575-5" -> "100415755"
+        - "12345678-9" -> "123456789"
+        - "1.234.567-8" -> "12345678"
+        """
+        if pd.isna(rut_value):
+            return ''
+
+        # Convertir a string y limpiar
+        rut_str = str(rut_value).strip()
+
+        # Eliminar puntos, guiones, espacios
+        rut_normalized = rut_str.replace('.', '').replace('-', '').replace(' ', '')
+
+        # Convertir a mayúsculas por si tiene 'K'
+        rut_normalized = rut_normalized.upper()
+
+        return rut_normalized
 
     def _parse_precio(self, value):
         """Parsea precios, manejando formato chileno"""

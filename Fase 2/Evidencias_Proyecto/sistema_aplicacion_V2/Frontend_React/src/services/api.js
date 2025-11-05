@@ -20,12 +20,22 @@ api.interceptors.response.use(
 
 // Servicios para Clientes
 export const clientesService = {
-  getAll: () => api.get('/clientes/'),
+  getAll: (params = {}) => {
+    // params: { page, page_size }
+    const queryParams = new URLSearchParams();
+
+    if (params.page) queryParams.append('page', params.page);
+    if (params.page_size) queryParams.append('page_size', params.page_size);
+
+    const queryString = queryParams.toString();
+    return api.get(`/clientes/${queryString ? `?${queryString}` : ''}`);
+  },
   getById: (id) => api.get(`/clientes/${id}/`),
   create: (data) => api.post('/clientes/', data),
   update: (id, data) => api.put(`/clientes/${id}/`, data),
   delete: (id) => api.delete(`/clientes/${id}/`),
-  getFrecuentes: () => api.get('/clientes/frecuentes/'), // Endpoint a crear
+  getFrecuentes: () => api.get('/clientes/frecuentes/'),
+  getStats: () => api.get('/clientes/stats/'),
 };
 
 // Servicios para Transacciones

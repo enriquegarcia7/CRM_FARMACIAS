@@ -10,35 +10,90 @@ const Customers = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Estados de paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const pageSize = 50;
+
+  // Estados de estadísticas globales
+  const [stats, setStats] = useState({
+    totalClientes: 0,
+    clientesFrecuentes: 0,
+    clientesNormales: 0,
+    elegiblesOfertas: 0
+  });
+
   useEffect(() => {
+    cargarEstadisticas();
     cargarClientes();
-  }, []);
+  }, [currentPage]);
 
   useEffect(() => {
     filtrarClientes();
   }, [searchTerm, tipoCliente, clientes]);
+
+  const cargarEstadisticas = async () => {
+    try {
+      const response = await clientesService.getStats();
+      setStats({
+        totalClientes: response.data.total_clientes || 0,
+        clientesFrecuentes: response.data.clientes_frecuentes || 0,
+        clientesNormales: response.data.clientes_normales || 0,
+        elegiblesOfertas: response.data.elegibles_ofertas || 0
+      });
+    } catch (error) {
+      console.error('Error cargando estadísticas:', error);
+    }
+  };
 
   const cargarClientes = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Consumir API real del backend
-      const response = await clientesService.getAll();
+      // Consumir API paginada del backend
+      const response = await clientesService.getAll({
+        page: currentPage,
+        page_size: pageSize
+      });
+
+      // Django REST Framework retorna: { count, next, previous, results }
+      const paginatedData = response.data;
+
+      // Verificar si tiene estructura paginada o es un array directo
+      let clientesData = [];
+      let totalCount = 0;
+
+      if (paginatedData.results && Array.isArray(paginatedData.results)) {
+        // Respuesta paginada
+        clientesData = paginatedData.results;
+        totalCount = paginatedData.count || 0;
+      } else if (Array.isArray(paginatedData)) {
+        // Respuesta directa (array)
+        clientesData = paginatedData;
+        totalCount = paginatedData.length;
+      } else {
+        console.error('Formato de respuesta inesperado:', paginatedData);
+        throw new Error('Formato de respuesta inválido');
+      }
 
       // Mapear datos del backend al formato esperado por el frontend
-      const clientesFormateados = response.data.map(cliente => ({
+      const clientesFormateados = clientesData.map(cliente => ({
         id: cliente.id,
         nombre: cliente.nombre,
         correo: cliente.correo,
         telefono: cliente.telefono || 'N/A',
-        totalCompras: cliente.transacciones?.length || 0,
-        montoTotal: cliente.monto_total_gastado || 0,
-        ultimaCompra: cliente.fecha_registro,
-        frecuencia: (cliente.transacciones?.length || 0) >= 5 ? 'frecuente' : 'normal'
+        totalCompras: cliente.total_compras || 0,
+        montoTotal: cliente.monto_total || 0,
+        ultimaCompra: cliente.ultima_compra,
+        frecuencia: cliente.frecuencia || 'normal'
       }));
 
       setClientes(clientesFormateados);
+      setTotalCount(totalCount);
+      setTotalPages(Math.ceil(totalCount / pageSize));
+
     } catch (error) {
       console.error('Error cargando clientes:', error);
       setError(error.response?.data?.message || error.message || 'Error al cargar clientes');
@@ -55,8 +110,7 @@ const Customers = () => {
       resultado = resultado.filter(
         (c) =>
           c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          c.correo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          c.telefono.includes(searchTerm)
+          c.correo.toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
 
@@ -85,14 +139,9 @@ const Customers = () => {
   };
 
   const enviarOfertasMasivas = () => {
-    const clientesFrecuentes = clientes.filter(c => c.frecuencia === 'frecuente' && c.totalCompras >= 5);
-    alert(`Se enviarán ofertas a ${clientesFrecuentes.length} clientes frecuentes con más de 5 compras.`);
+    alert(`Se enviarán ofertas a ${stats.elegiblesOfertas} clientes frecuentes con más de 5 compras.`);
     // Aquí se implementará la lógica de envío de correos
   };
-
-  const clientesFrecuentes = clientes.filter((c) => c.frecuencia === 'frecuente').length;
-  const clientesNormales = clientes.filter((c) => c.frecuencia === 'normal').length;
-  const clientesElegiblesOfertas = clientes.filter((c) => c.frecuencia === 'frecuente' && c.totalCompras >= 5).length;
 
   if (loading) {
     return (
@@ -144,7 +193,7 @@ const Customers = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-500 text-sm">Total Clientes</p>
-              <p className="text-3xl font-bold mt-2">{clientes.length}</p>
+              <p className="text-3xl font-bold mt-2">{stats.totalClientes}</p>
             </div>
             <User size={40} className="text-blue-500" />
           </div>
@@ -154,7 +203,7 @@ const Customers = () => {
             <div>
               <p className="text-gray-500 text-sm">Clientes Frecuentes</p>
               <p className="text-3xl font-bold mt-2 text-green-600">
-                {clientesFrecuentes}
+                {stats.clientesFrecuentes}
               </p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
@@ -167,7 +216,7 @@ const Customers = () => {
             <div>
               <p className="text-gray-500 text-sm">Clientes Normales</p>
               <p className="text-3xl font-bold mt-2 text-gray-600">
-                {clientesNormales}
+                {stats.clientesNormales}
               </p>
             </div>
             <User size={40} className="text-gray-400" />
@@ -178,7 +227,7 @@ const Customers = () => {
             <div>
               <p className="text-gray-500 text-sm">Elegibles para Ofertas</p>
               <p className="text-3xl font-bold mt-2 text-purple-600">
-                {clientesElegiblesOfertas}
+                {stats.elegiblesOfertas}
               </p>
               <p className="text-xs text-gray-500 mt-1">&gt;5 compras</p>
             </div>
@@ -196,7 +245,7 @@ const Customers = () => {
             <Search className="absolute left-3 top-3 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar por nombre, correo o teléfono..."
+              placeholder="Buscar por nombre o correo..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -233,9 +282,6 @@ const Customers = () => {
                   Correo
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Teléfono
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Total Compras
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -268,9 +314,6 @@ const Customers = () => {
                   <td className="px-6 py-4 text-sm text-gray-500">
                     {cliente.correo}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {cliente.telefono}
-                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900">
                     {cliente.totalCompras}
                   </td>
@@ -299,6 +342,81 @@ const Customers = () => {
         {filteredClientes.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             No se encontraron clientes
+          </div>
+        )}
+
+        {/* Controles de paginación */}
+        {totalPages > 1 && (
+          <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                Mostrando <span className="font-semibold">{(currentPage - 1) * pageSize + 1}</span> a{' '}
+                <span className="font-semibold">
+                  {Math.min(currentPage * pageSize, totalCount)}
+                </span>{' '}
+                de <span className="font-semibold">{totalCount}</span> clientes
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* Botón Primera Página */}
+                <button
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1}
+                  className={`px-3 py-1 rounded ${
+                    currentPage === 1
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  Primera
+                </button>
+
+                {/* Botón Anterior */}
+                <button
+                  onClick={() => setCurrentPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className={`px-3 py-1 rounded ${
+                    currentPage === 1
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  Anterior
+                </button>
+
+                {/* Indicador de página actual */}
+                <span className="px-4 py-1 text-sm text-gray-700">
+                  Página <span className="font-semibold">{currentPage}</span> de{' '}
+                  <span className="font-semibold">{totalPages}</span>
+                </span>
+
+                {/* Botón Siguiente */}
+                <button
+                  onClick={() => setCurrentPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className={`px-3 py-1 rounded ${
+                    currentPage === totalPages
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  Siguiente
+                </button>
+
+                {/* Botón Última Página */}
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  className={`px-3 py-1 rounded ${
+                    currentPage === totalPages
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                      : 'bg-blue-600 text-white hover:bg-blue-700'
+                  }`}
+                >
+                  Última
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

@@ -109,6 +109,7 @@ const Sales = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 300000, // 5 minutos
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
           setUploadProgress(percentCompleted);
@@ -166,13 +167,30 @@ const Sales = () => {
     return `$${Number(precio).toLocaleString('es-CL')}`;
   };
 
+  const formatearRut = (rut) => {
+    if (!rut) return '';
+    // RUT está guardado sin puntos ni guión: "100415755"
+    // Formato de salida: "10.041.575-5"
+    const rutStr = rut.toString().replace(/\./g, '').replace(/-/g, '');
+
+    if (rutStr.length < 2) return rut;
+
+    const dv = rutStr.slice(-1);
+    const numero = rutStr.slice(0, -1);
+
+    // Agregar puntos cada 3 dígitos desde la derecha
+    const numeroFormateado = numero.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+    return `${numeroFormateado}-${dv}`;
+  };
+
   // Aplanar ventas con detalles para mostrar en tabla
   const ventasAplanadas = ventas.flatMap(venta =>
     venta.detalles.map(detalle => ({
       ventaId: venta.id,
       numero: venta.numero,
       fecha: venta.fecha,
-      clienteRut: venta.cliente,
+      clienteRut: venta.cliente_rut,
       clienteNombre: venta.cliente_nombre,
       codigo: detalle.producto,
       producto: detalle.producto_descripcion,
@@ -289,7 +307,7 @@ const Sales = () => {
                     <tr key={`${item.ventaId}-${index}`} className="hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3 text-sm text-gray-900">{item.numero || 'S/N'}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{formatearFecha(item.fecha)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">{item.clienteRut}</td>
+                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">{formatearRut(item.clienteRut)}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">{item.clienteNombre}</td>
                       <td className="px-4 py-3 text-sm text-gray-600 font-mono">{item.codigo}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">{item.producto}</td>

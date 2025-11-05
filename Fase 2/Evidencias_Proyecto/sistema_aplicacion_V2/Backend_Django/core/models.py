@@ -133,6 +133,18 @@ class Producto(models.Model):
     def bajo_stock(self):
         return self.stock_actual < self.stock_minimo
 
+    @property
+    def stock_minimo_dinamico(self):
+        """Calcula el stock mínimo dinámico basado en ventas históricas y predicción"""
+        from .stock_service import stock_service
+        return stock_service.calcular_stock_minimo(self)
+
+    @property
+    def metricas_stock(self):
+        """Retorna métricas de stock útiles para el frontend"""
+        from .stock_service import stock_service
+        return stock_service.obtener_metricas_producto(self)
+
 
 class Proveedor(models.Model):
     """
@@ -411,6 +423,7 @@ class SugerenciaCompra(models.Model):
 
 
 class Venta(models.Model):
+    tipo_documento = models.CharField(max_length=50, blank=True, null=True, help_text='Tipo de documento (Factura, Boleta, etc)')
     numero = models.CharField(max_length=50, blank=True, null=True, help_text='Número de documento de venta')
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='ventas')
     fecha = models.DateTimeField(default=timezone.now)

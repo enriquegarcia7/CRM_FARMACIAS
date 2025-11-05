@@ -2,12 +2,12 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Count, Sum
-from django.db.models.functions import TruncMonth
+from django.db.models import Count, Sum, F
+from django.db.models.functions import TruncMonth, TruncDate
 from datetime import datetime, timedelta
 import numpy as np
 from .ml_service import seasonal_service
-from .models import VentaHistorica, Producto
+from .models import Venta, DetalleVenta, Producto, Categoria
 
 @api_view(['POST'])
 def predict_seasonal_demand(request):
@@ -32,14 +32,15 @@ def predict_seasonal_demand(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Obtener datos históricos de la categoría
-        historico = VentaHistorica.objects.filter(
-            producto__categoria__nombre=categoria
+        # Obtener datos históricos de la categoría desde DetalleVenta
+        historico = DetalleVenta.objects.filter(
+            producto__categoria__nombre=categoria,
+            venta__estado='completada'
         ).annotate(
-            mes_venta=TruncMonth('fecha')
+            mes_venta=TruncMonth('venta__fecha')
         ).values('mes_venta').annotate(
-            transacciones=Count('id'),
-            monto_total=Sum('monto_total'),
+            transacciones=Count('venta', distinct=True),
+            monto_total=Sum('subtotal'),
             cantidad_total=Sum('cantidad')
         ).order_by('-mes_venta')[:12]  # Últimos 12 meses
         
@@ -154,13 +155,14 @@ def get_seasonal_predictions_year(request):
         #         status=status.HTTP_404_NOT_FOUND
         #     )
         
-        # Obtener datos históricos
-        historico = VentaHistorica.objects.filter(
-            producto__categoria__nombre=categoria
+        # Obtener datos históricos desde DetalleVenta
+        historico = DetalleVenta.objects.filter(
+            producto__categoria__nombre=categoria,
+            venta__estado='completada'
         ).annotate(
-            mes_venta=TruncMonth('fecha')
+            mes_venta=TruncMonth('venta__fecha')
         ).values('mes_venta').annotate(
-            transacciones=Count('id')
+            transacciones=Count('venta', distinct=True)
         ).order_by('-mes_venta')[:12]
         
         # MODIFICACIÓN: Si no hay datos, usar dummy
@@ -223,39 +225,18 @@ def get_seasonal_predictions_year(request):
 
 @api_view(['GET'])
 def get_available_categories(request):
-    """Retorna todas las categorías disponibles para predicción"""
+    """Retorna todas las categorías disponibles para predicción desde el modelo ML"""
     try:
-        # MODIFICACIÓN: Intentar desde DB, si falla usar hardcoded
-        try:
-            categorias = Producto.objects.values_list('categoria', flat=True).distinct().order_by('categoria')
-            categorias_validas = [c for c in categorias if c and c.strip() and c != '0']
-            
-            if not categorias_validas:
-                raise ValueError("No hay categorías en DB")
-                
-        except Exception as e:
-            print(f"⚠️ No se pudieron cargar categorías desde DB: {e}")
-            print("   Usando categorías hardcoded del dataset de entrenamiento")
-            # Categorías del dataset real usado en el entrenamiento
-            categorias_validas = [
-                'ANALGESICO',
-                'ANALGESICO-ANTIINFLAMATORIO',
-                'ANALGESICO-ANTIPIRETICO',
-                'ANTIBIOTICO',
-                'ANTIDIABETICO',
-                'ANTIGRIPAL',
-                'ANTIHISTAMINICO',
-                'ANTIULCEROSO',
-                'HIPOTENSORES',
-                'HIPOLIPEMIANTE',
-                'BRONCODILATADOR'
-            ]
-        
+        # Obtener categorías directamente desde el label encoder del modelo ML
+        categorias_ml = seasonal_service.get_available_categories()
+
         return Response({
-            'categorias': sorted(categorias_validas),
-            'total': len(categorias_validas)
+            'categorias': sorted(categorias_ml),
+            'total': len(categorias_ml),
+            'fuente': 'Modelo ML entrenado',
+            'descripcion': f'El modelo soporta {len(categorias_ml)} categorías farmacéuticas específicas'
         })
-        
+
     except Exception as e:
         import traceback
         traceback.print_exc()
