@@ -173,8 +173,8 @@ const Inventory = () => {
   };
 
   const getStockStatus = (producto) => {
-    // Usar stock mínimo dinámico si está disponible, sino usar el estático
-    const stockMinimo = producto.stock_minimo_dinamico || producto.stock_minimo;
+    // SIEMPRE usar stock mínimo calculado dinámicamente (ML + Ventas históricas)
+    const stockMinimo = producto.stock_minimo_calculado || 5; // 5 es mínimo absoluto de emergencia
     const porcentaje = stockMinimo > 0 ? (producto.stock_actual / stockMinimo) * 100 : 100;
     if (porcentaje < 50) return { color: 'text-red-600 bg-red-100', label: 'Crítico' };
     if (porcentaje < 100) return { color: 'text-yellow-600 bg-yellow-100', label: 'Bajo' };
@@ -314,7 +314,7 @@ const Inventory = () => {
                   Stock
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock Mín. (Dinámico)
+                  Stock Mín. ML
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
                   Demanda Diaria
@@ -340,14 +340,12 @@ const Inventory = () => {
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm">
                       <div className="flex flex-col">
-                        <span className="font-semibold text-blue-600">
-                          {producto.stock_minimo_dinamico || producto.stock_minimo}
+                        <span className="font-bold text-indigo-600">
+                          {producto.stock_minimo_calculado || 5}
                         </span>
-                        {producto.stock_minimo_dinamico && producto.stock_minimo_dinamico !== producto.stock_minimo && (
-                          <span className="text-xs text-gray-400">
-                            (fijo: {producto.stock_minimo})
-                          </span>
-                        )}
+                        <span className="text-xs text-indigo-400 font-medium">
+                          ML + Histórico
+                        </span>
                       </div>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm">

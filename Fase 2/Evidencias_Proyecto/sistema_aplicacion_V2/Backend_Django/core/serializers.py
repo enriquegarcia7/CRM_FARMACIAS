@@ -73,7 +73,7 @@ class TransaccionSerializer(serializers.ModelSerializer):
 
 class ProductoSerializer(serializers.ModelSerializer):
     bajo_stock = serializers.ReadOnlyField()
-    stock_minimo_dinamico = serializers.ReadOnlyField()
+    stock_minimo_calculado = serializers.ReadOnlyField()  # Stock dinámico ML
     metricas_stock = serializers.ReadOnlyField()
 
     class Meta:
