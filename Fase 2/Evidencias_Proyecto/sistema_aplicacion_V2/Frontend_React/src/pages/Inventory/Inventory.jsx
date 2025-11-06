@@ -173,7 +173,9 @@ const Inventory = () => {
   };
 
   const getStockStatus = (producto) => {
-    const porcentaje = producto.stock_minimo > 0 ? (producto.stock_actual / producto.stock_minimo) * 100 : 100;
+    // SIEMPRE usar stock mínimo calculado dinámicamente (ML + Ventas históricas)
+    const stockMinimo = producto.stock_minimo_calculado || 5; // 5 es mínimo absoluto de emergencia
+    const porcentaje = stockMinimo > 0 ? (producto.stock_actual / stockMinimo) * 100 : 100;
     if (porcentaje < 50) return { color: 'text-red-600 bg-red-100', label: 'Crítico' };
     if (porcentaje < 100) return { color: 'text-yellow-600 bg-yellow-100', label: 'Bajo' };
     return { color: 'text-green-600 bg-green-100', label: 'Normal' };
@@ -312,7 +314,10 @@ const Inventory = () => {
                   Stock
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock Mín.
+                  Stock Mín. ML
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                  Demanda Diaria
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Estado
@@ -333,8 +338,29 @@ const Inventory = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {producto.stock_actual}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                      {producto.stock_minimo}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-indigo-600">
+                          {producto.stock_minimo_calculado || 5}
+                        </span>
+                        <span className="text-xs text-indigo-400 font-medium">
+                          ML + Histórico
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      {producto.metricas_stock ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium">
+                            {producto.metricas_stock.demanda_promedio_diaria.toFixed(1)} u/día
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {Math.round(producto.metricas_stock.dias_cobertura)} días cobertura
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">Sin datos</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span

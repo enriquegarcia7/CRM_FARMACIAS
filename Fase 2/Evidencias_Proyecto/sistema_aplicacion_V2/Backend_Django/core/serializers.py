@@ -73,6 +73,8 @@ class TransaccionSerializer(serializers.ModelSerializer):
 
 class ProductoSerializer(serializers.ModelSerializer):
     bajo_stock = serializers.ReadOnlyField()
+    stock_minimo_calculado = serializers.ReadOnlyField()  # Stock dinámico ML
+    metricas_stock = serializers.ReadOnlyField()
 
     class Meta:
         model = Producto
@@ -289,6 +291,8 @@ class DetalleVentaSerializer(serializers.ModelSerializer):
 
 class VentaSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source='cliente.nombre', read_only=True)
+    cliente_rut = serializers.CharField(source='cliente.rut', read_only=True)
+    cliente_correo = serializers.EmailField(source='cliente.correo', read_only=True)
     detalles = DetalleVentaSerializer(many=True, read_only=True)
 
     class Meta:

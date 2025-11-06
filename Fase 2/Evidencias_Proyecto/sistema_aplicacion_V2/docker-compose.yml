@@ -31,7 +31,7 @@ services:
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
              python manage.py shell -c \"from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.create_superuser('bhartal', 'bastianhartal@gmail.com', '123456') if not User.objects.filter(username='bhartal').exists() else print('Superuser bhartal already exists')\" &&
-             gunicorn --bind 0.0.0.0:8000 --workers 3 SmartPharm.wsgi:application"
+             gunicorn --bind 0.0.0.0:8000 --workers 3 --timeout 300 SmartPharm.wsgi:application"
     volumes:
       # Volumen habilitado para acceder a gmail_credentials.json
       - ./Backend_Django:/app

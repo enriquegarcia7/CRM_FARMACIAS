@@ -7,25 +7,46 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 90000, // 90 segundos - timeout para solicitudes largas
 });
 
 // Interceptor para manejo de errores
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    console.error('API Error:', error);
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      console.error('API Timeout:', error);
+      error.message = 'La solicitud tardó demasiado tiempo. El servidor puede estar procesando datos. Intenta recargar en unos momentos.';
+    } else if (error.response) {
+      console.error('API Error Response:', error.response.status, error.response.data);
+    } else if (error.request) {
+      console.error('API No Response:', error.request);
+      error.message = 'No se pudo conectar con el servidor. Verifica que el backend esté ejecutándose.';
+    } else {
+      console.error('API Error:', error.message);
+    }
     return Promise.reject(error);
   }
 );
 
 // Servicios para Clientes
 export const clientesService = {
-  getAll: () => api.get('/clientes/'),
+  getAll: (params = {}) => {
+    // params: { page, page_size }
+    const queryParams = new URLSearchParams();
+
+    if (params.page) queryParams.append('page', params.page);
+    if (params.page_size) queryParams.append('page_size', params.page_size);
+
+    const queryString = queryParams.toString();
+    return api.get(`/clientes/${queryString ? `?${queryString}` : ''}`);
+  },
   getById: (id) => api.get(`/clientes/${id}/`),
   create: (data) => api.post('/clientes/', data),
   update: (id, data) => api.put(`/clientes/${id}/`, data),
   delete: (id) => api.delete(`/clientes/${id}/`),
-  getFrecuentes: () => api.get('/clientes/frecuentes/'), // Endpoint a crear
+  getFrecuentes: () => api.get('/clientes/frecuentes/'),
+  getStats: () => api.get('/clientes/stats/'),
 };
 
 // Servicios para Transacciones
@@ -74,6 +95,28 @@ export const sugerenciasService = {
   getByLowStock: () => api.get('/sugerencias/low-stock/'),
   getBySeason: () => api.get('/sugerencias/season/'),
   getByEpidemiological: () => api.get('/sugerencias/epidemiological/'),
+
+  // MVP Purchase Optimizer Endpoints
+  generar: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.limite) queryParams.append('limite', params.limite);
+    if (params.forzar_mapeo !== undefined) queryParams.append('forzar_mapeo', params.forzar_mapeo);
+
+    const queryString = queryParams.toString();
+    return api.post(`/sugerencias/generar/${queryString ? `?${queryString}` : ''}`);
+  },
+
+  consolidar: () => api.get('/sugerencias/consolidar/'),
+
+  exportExcel: (params = {}) => {
+    const queryParams = new URLSearchParams();
+    if (params.proveedor) queryParams.append('proveedor', params.proveedor);
+
+    const queryString = queryParams.toString();
+    return api.get(`/sugerencias/export-excel/${queryString ? `?${queryString}` : ''}`, {
+      responseType: 'blob'
+    });
+  },
 };
 
 // Servicios para Ofertas de Laboratorios (ETL)

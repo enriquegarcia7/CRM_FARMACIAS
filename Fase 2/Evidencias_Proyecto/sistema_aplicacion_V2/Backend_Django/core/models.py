@@ -130,8 +130,27 @@ class Producto(models.Model):
         return f"{self.codigo} - {self.nombre}"
 
     @property
+    def stock_minimo_calculado(self):
+        """
+        Calcula el stock mínimo SIEMPRE de forma dinámica usando:
+        1. Ventas históricas reales
+        2. Modelo ML de predicción estacional según categoría
+
+        NO usa valores fijos. El campo 'stock_minimo' en BD es solo referencial/legacy.
+        """
+        from .stock_service import stock_service
+        return stock_service.calcular_stock_minimo(self)
+
+    @property
     def bajo_stock(self):
-        return self.stock_actual < self.stock_minimo
+        """Compara stock actual vs stock mínimo DINÁMICO (no usa valor fijo)"""
+        return self.stock_actual < self.stock_minimo_calculado
+
+    @property
+    def metricas_stock(self):
+        """Retorna métricas de stock útiles para el frontend"""
+        from .stock_service import stock_service
+        return stock_service.obtener_metricas_producto(self)
 
 
 class Proveedor(models.Model):
@@ -378,6 +397,10 @@ class ArchivoProcesado(models.Model):
 
 
 class SugerenciaCompra(models.Model):
+    """
+    Sugerencias de compra generadas automáticamente.
+    Incluye optimización de proveedor y detección de ofertas.
+    """
     TIPO_SUGERENCIA = [
         ('bajo_stock', 'Bajo Stock'),
         ('estacional', 'Estacional'),
@@ -392,25 +415,88 @@ class SugerenciaCompra(models.Model):
         ('critica', 'Crítica'),
     ]
 
-    producto = models.ForeignKey(Producto, on_delete=models.CASCADE)
+    producto = models.ForeignKey(Producto, on_delete=models.CASCADE, related_name='sugerencias')
     tipo = models.CharField(max_length=20, choices=TIPO_SUGERENCIA)
     cantidad_sugerida = models.IntegerField()
     prioridad = models.CharField(max_length=10, choices=PRIORIDAD)
     razon = models.TextField()
     confianza_ml = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
     fuente_datos = models.CharField(max_length=100, blank=True)
+
+    # Optimización de proveedor (MVP)
+    proveedor_recomendado = models.ForeignKey(
+        Proveedor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Proveedor óptimo basado en precio y disponibilidad"
+    )
+    codigo_proveedor = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="Código del producto en el catálogo del proveedor"
+    )
+    precio_unitario = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Precio unitario del proveedor recomendado"
+    )
+    tiene_oferta = models.BooleanField(default=False)
+    precio_oferta = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Precio con oferta si aplica"
+    )
+    descuento_porcentaje = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text="Porcentaje de descuento si tiene oferta"
+    )
+    dias_cobertura = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Días de cobertura actuales del producto"
+    )
+
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     procesada = models.BooleanField(default=False)
+    incluida_en_orden = models.BooleanField(default=False, help_text="Si fue incluida en una orden de compra")
 
     class Meta:
         verbose_name_plural = "Sugerencias de Compra"
         ordering = ['-prioridad', '-fecha_creacion']
+        indexes = [
+            models.Index(fields=['procesada', 'prioridad'], name='idx_sug_proc_prior'),
+            models.Index(fields=['proveedor_recomendado', 'procesada'], name='idx_sug_prov_proc'),
+        ]
 
     def __str__(self):
         return f"{self.get_tipo_display()} - {self.producto.descripcion} (x{self.cantidad_sugerida})"
 
+    @property
+    def total(self):
+        """Total de la sugerencia"""
+        precio = self.precio_oferta if self.tiene_oferta and self.precio_oferta else self.precio_unitario
+        if precio:
+            return float(precio) * self.cantidad_sugerida
+        return 0
+
+    @property
+    def ahorro_total(self):
+        """Ahorro total si tiene oferta"""
+        if self.tiene_oferta and self.precio_unitario and self.precio_oferta:
+            ahorro_unitario = float(self.precio_unitario - self.precio_oferta)
+            return ahorro_unitario * self.cantidad_sugerida
+        return 0
+
 
 class Venta(models.Model):
+    tipo_documento = models.CharField(max_length=50, blank=True, null=True, help_text='Tipo de documento (Factura, Boleta, etc)')
     numero = models.CharField(max_length=50, blank=True, null=True, help_text='Número de documento de venta')
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='ventas')
     fecha = models.DateTimeField(default=timezone.now)
