@@ -73,6 +73,8 @@ class TransaccionSerializer(serializers.ModelSerializer):
 
 class ProductoSerializer(serializers.ModelSerializer):
     bajo_stock = serializers.ReadOnlyField()
+    stock_minimo_calculado = serializers.ReadOnlyField()  # Stock dinámico ML
+    metricas_stock = serializers.ReadOnlyField()
 
     class Meta:
         model = Producto
@@ -166,8 +168,9 @@ class ProveedorSerializer(serializers.ModelSerializer):
 
 
 class OfertaLaboratorioSerializer(serializers.ModelSerializer):
-    proveedor_nombre = serializers.CharField(source='proveedor.nombre', read_only=True)
-    producto_descripcion = serializers.CharField(source='producto.descripcion', read_only=True)
+    proveedor_nombre = serializers.CharField(source='producto_catalogo.proveedor.nombre', read_only=True)
+    producto_descripcion = serializers.CharField(source='producto_catalogo.descripcion', read_only=True)
+    laboratorio_nombre = serializers.CharField(source='laboratorio.nombre', read_only=True)
     ahorro = serializers.ReadOnlyField()
 
     class Meta:
@@ -184,16 +187,16 @@ class OfertaLaboratorioDetalladaSerializer(serializers.ModelSerializer):
     proveedor = serializers.SerializerMethodField()
 
     # Código producto
-    codigo_producto = serializers.CharField(source='producto.codigo', read_only=True)
+    codigo_producto = serializers.CharField(source='producto_catalogo.codigo', read_only=True)
 
     # Descripción del producto
-    descripcion = serializers.CharField(source='producto.nombre', read_only=True)
+    descripcion = serializers.CharField(source='producto_catalogo.nombre', read_only=True)
 
     # Principio activo
-    principio_activo = serializers.CharField(source='producto.descripcion', read_only=True)
+    principio_activo = serializers.CharField(source='producto_catalogo.descripcion', read_only=True)
 
-    # Laboratorio (puede venir del campo o de la tabla proveedor)
-    laboratorio = serializers.CharField(read_only=True)
+    # Laboratorio (ahora es FK)
+    laboratorio = serializers.CharField(source='laboratorio.nombre', read_only=True)
 
     # Lote (si existe en el producto)
     lote = serializers.SerializerMethodField()
@@ -237,12 +240,12 @@ class OfertaLaboratorioDetalladaSerializer(serializers.ModelSerializer):
 
         IMPORTANTE:
         - PROVEEDOR: Empresa que envía las ofertas (Mediven, Socofar, etc.)
-        - LABORATORIO: Fabricante del producto (3M, Abbott, etc.) - está en obj.laboratorio
+        - LABORATORIO: Fabricante del producto (3M, Abbott, etc.) - está en obj.laboratorio.nombre
 
-        El proveedor viene de: producto.proveedor.nombre
+        El proveedor viene de: producto_catalogo.proveedor.nombre
         """
-        if obj.producto and obj.producto.proveedor:
-            return obj.producto.proveedor.nombre
+        if obj.producto_catalogo and obj.producto_catalogo.proveedor:
+            return obj.producto_catalogo.proveedor.nombre
         return 'Sin proveedor'
 
     def get_lote(self, obj):
@@ -288,6 +291,8 @@ class DetalleVentaSerializer(serializers.ModelSerializer):
 
 class VentaSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source='cliente.nombre', read_only=True)
+    cliente_rut = serializers.CharField(source='cliente.rut', read_only=True)
+    cliente_correo = serializers.EmailField(source='cliente.correo', read_only=True)
     detalles = DetalleVentaSerializer(many=True, read_only=True)
 
     class Meta:

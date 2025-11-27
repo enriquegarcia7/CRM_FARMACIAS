@@ -1,7 +1,14 @@
+import os
 from pathlib import Path
 from decouple import config
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Machine Learning Models Path
+ML_MODELS_PATH = os.path.join(BASE_DIR, 'ml_models')
+
+# Crear directorio si no existe
+os.makedirs(ML_MODELS_PATH, exist_ok=True)
 
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-smartpharm-key')
 DEBUG = config('DEBUG', default=True, cast=bool)

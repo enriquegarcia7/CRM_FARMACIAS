@@ -4,12 +4,15 @@ import {
   Package,
   Users,
   ShoppingCart,
+  TrendingUp,
   Tag,
   Database,
   Menu,
   X,
   LogOut,
-  CheckCircle
+  CheckCircle,
+  Receipt,
+  Percent
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
@@ -31,7 +34,9 @@ const Layout = () => {
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/inventario', icon: Package, label: 'Inventario' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
-    { path: '/ofertas-laboratorio', icon: Tag, label: 'Ofertas' },
+    { path: '/ventas', icon: Receipt, label: 'Ventas' },
+    { path: '/ofertas-laboratorio', icon: Percent, label: 'Ofertas' },
+    { path: '/demanda-estacional', icon: TrendingUp, label: 'Demanda Estacional' },
     { path: '/sugerencias', icon: ShoppingCart, label: 'Sugerencias de Compra' },
     { path: '/etl', icon: Database, label: 'ETL' },
   ];
@@ -60,7 +65,6 @@ const Layout = () => {
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
-
             return (
               <Link
                 key={item.path}

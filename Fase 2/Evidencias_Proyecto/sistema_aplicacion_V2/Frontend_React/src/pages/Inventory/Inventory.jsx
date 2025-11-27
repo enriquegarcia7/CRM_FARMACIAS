@@ -23,6 +23,7 @@ const Inventory = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef(null);
 
   // Cargar productos cuando cambian filtros o página
@@ -118,11 +119,24 @@ const Inventory = () => {
     try {
       setUploading(true);
       setUploadResult(null);
+      setUploadProgress(0);
+
+      // Simular progreso mientras se procesa el archivo
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) return prev;
+          return prev + Math.random() * 15;
+        });
+      }, 300);
 
       const formData = new FormData();
       formData.append('archivo', uploadFile);
 
       const response = await productosService.cargarExcel(formData);
+
+      // Completar la barra de progreso
+      clearInterval(progressInterval);
+      setUploadProgress(100);
 
       setUploadResult({
         success: true,
@@ -135,13 +149,9 @@ const Inventory = () => {
         cargarUltimaCarga();
       }, 1000);
 
-      // Auto-cerrar modal después de 3 segundos si fue exitoso
-      setTimeout(() => {
-        closeUploadModal();
-      }, 3000);
-
     } catch (error) {
       console.error('Error cargando Excel:', error);
+      setUploadProgress(0);
       setUploadResult({
         success: false,
         error: error.response?.data?.error || error.message || 'Error al cargar archivo'
@@ -156,13 +166,16 @@ const Inventory = () => {
     setUploadFile(null);
     setUploadResult(null);
     setShowConfirmation(false);
+    setUploadProgress(0);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
   const getStockStatus = (producto) => {
-    const porcentaje = producto.stock_minimo > 0 ? (producto.stock_actual / producto.stock_minimo) * 100 : 100;
+    // SIEMPRE usar stock mínimo calculado dinámicamente (ML + Ventas históricas)
+    const stockMinimo = producto.stock_minimo_calculado || 5; // 5 es mínimo absoluto de emergencia
+    const porcentaje = stockMinimo > 0 ? (producto.stock_actual / stockMinimo) * 100 : 100;
     if (porcentaje < 50) return { color: 'text-red-600 bg-red-100', label: 'Crítico' };
     if (porcentaje < 100) return { color: 'text-yellow-600 bg-yellow-100', label: 'Bajo' };
     return { color: 'text-green-600 bg-green-100', label: 'Normal' };
@@ -301,7 +314,10 @@ const Inventory = () => {
                   Stock
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock Mín.
+                  Stock Mín. ML
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                  Demanda Diaria
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Estado
@@ -322,8 +338,29 @@ const Inventory = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {producto.stock_actual}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                      {producto.stock_minimo}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-indigo-600">
+                          {producto.stock_minimo_calculado || 5}
+                        </span>
+                        <span className="text-xs text-indigo-400 font-medium">
+                          ML + Histórico
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      {producto.metricas_stock ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium">
+                            {producto.metricas_stock.demanda_promedio_diaria.toFixed(1)} u/día
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {Math.round(producto.metricas_stock.dias_cobertura)} días cobertura
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">Sin datos</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span
@@ -478,6 +515,22 @@ const Inventory = () => {
                 </div>
               )}
 
+              {/* Barra de progreso */}
+              {uploading && (
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm text-gray-700">
+                    <span>Procesando archivo...</span>
+                    <span className="font-semibold">{Math.round(uploadProgress)}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="bg-blue-600 h-full rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${uploadProgress}%` }}
+                    ></div>
+                  </div>
+                </div>
+              )}
+
               {uploadResult && (
                 <div className={`border rounded-lg p-4 ${uploadResult.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                   {uploadResult.success ? (
@@ -507,7 +560,20 @@ const Inventory = () => {
               )}
 
               <div className="flex gap-3">
-                {showConfirmation && !uploadResult ? (
+                {uploadResult ? (
+                  // Mostrar botón OK cuando hay resultado
+                  <button
+                    onClick={closeUploadModal}
+                    className={`flex-1 px-4 py-3 rounded-lg font-bold text-white text-lg ${
+                      uploadResult.success
+                        ? 'bg-green-600 hover:bg-green-700'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    {uploadResult.success ? '✓ OK' : 'Cerrar'}
+                  </button>
+                ) : showConfirmation ? (
+                  // Mostrar botones de confirmación
                   <>
                     <button
                       onClick={handleUploadExcel}
@@ -545,6 +611,7 @@ const Inventory = () => {
                     </button>
                   </>
                 ) : (
+                  // Botón cerrar por defecto
                   <button
                     onClick={closeUploadModal}
                     className="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"

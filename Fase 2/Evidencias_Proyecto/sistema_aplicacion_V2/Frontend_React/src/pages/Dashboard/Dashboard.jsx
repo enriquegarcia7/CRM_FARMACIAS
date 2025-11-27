@@ -54,8 +54,20 @@ const Dashboard = () => {
         clientesActivos: statsRes.data.clientes_activos || 0,
       });
 
-      setVentasMensuales(salesRes.data || []);
-      setTopProductos(topProdRes.data || []);
+      // Mapear ventas mensuales: "total" -> "ventas"
+      const ventasMapeadas = (salesRes.data || []).map(venta => ({
+        mes: venta.mes,
+        ventas: venta.total
+      }));
+      setVentasMensuales(ventasMapeadas);
+
+      // Mapear productos: "producto__descripcion" -> "nombre"
+      const productosMapeados = (topProdRes.data || []).map(producto => ({
+        nombre: producto.producto__descripcion || producto.producto__codigo,
+        cantidad: producto.cantidad,
+        ventas: producto.ventas
+      }));
+      setTopProductos(productosMapeados);
 
     } catch (error) {
       console.error('Error cargando datos del dashboard:', error);

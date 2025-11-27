@@ -95,10 +95,10 @@ function ETL() {
       setProgress(null);
 
       // Usar modo amplio (strict_mode=false) para buscar todos los correos con Excel/CSV
-      const response = await etlService.runManual(2, false);
+      const response = await etlService.runManual(5, false);
 
       if (response.data.success) {
-        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar y mensajes con palabras clave (últimos 2 días)...');
+        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar/Provefarma y mensajes con palabras clave (últimos 5 días)...');
         setIsRunning(true); // Iniciar polling de progreso
       }
     } catch (err) {
@@ -325,9 +325,9 @@ function ETL() {
         </div>
       )}
 
-      {/* Historial */}
+      {/* Historial - Últimos 5 */}
       <div className="bg-white rounded-lg shadow p-6">
-        <h2 className="text-xl font-semibold mb-4">Historial de Ejecuciones</h2>
+        <h2 className="text-xl font-semibold mb-4">Historial de Ejecuciones (Últimas 5)</h2>
 
         {logs.length === 0 ? (
           <p className="text-gray-500">No hay registros de ejecuciones anteriores</p>
@@ -346,7 +346,7 @@ function ETL() {
                 </tr>
               </thead>
               <tbody>
-                {logs.map((log) => (
+                {logs.slice(0, 5).map((log) => (
                   <tr key={log.id} className="border-t hover:bg-gray-50">
                     <td className="px-4 py-2 text-sm">
                       {new Date(log.fecha_ejecucion).toLocaleString('es-CL')}
@@ -371,44 +371,6 @@ function ETL() {
         )}
       </div>
 
-      {/* Información adicional */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-blue-900 mb-2">ℹ️ Criterios de Validación</h3>
-        <div className="space-y-3">
-          <div>
-            <p className="font-semibold text-blue-900 mb-1">📧 Búsqueda de correos:</p>
-            <ul className="list-disc list-inside text-blue-800 text-sm space-y-1 ml-4">
-              <li>Busca correos de los últimos 2 días con adjuntos Excel/CSV</li>
-              <li>Formatos aceptados: .xlsx, .xls, .csv</li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-semibold text-blue-900 mb-1">✅ Correos aceptados:</p>
-            <ul className="list-disc list-inside text-blue-800 text-sm space-y-1 ml-4">
-              <li><strong>Dominios confiables:</strong> Mediven, Socofar (siempre se aceptan)</li>
-              <li><strong>Palabras clave en asunto/cuerpo:</strong> Precio, Oferta, Laboratorio, Promoción, Lista, Descuento, Farmacia (singular/plural, mayúsculas/minúsculas)</li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-semibold text-blue-900 mb-1">❌ Correos excluidos:</p>
-            <ul className="list-disc list-inside text-blue-800 text-sm space-y-1 ml-4">
-              <li>Correos enviados desde proyectosmartpharm2025@gmail.com</li>
-              <li>Correos sin palabras clave ni de dominios confiables</li>
-            </ul>
-          </div>
-
-          <div>
-            <p className="font-semibold text-blue-900 mb-1">🔄 Proceso:</p>
-            <ul className="list-disc list-inside text-blue-800 text-sm space-y-1 ml-4">
-              <li>Extrae ofertas de los archivos validados</li>
-              <li>Reescribe completamente la base de datos (elimina ofertas antiguas)</li>
-              <li>Gmail se autoriza automáticamente al iniciar sesión</li>
-            </ul>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
