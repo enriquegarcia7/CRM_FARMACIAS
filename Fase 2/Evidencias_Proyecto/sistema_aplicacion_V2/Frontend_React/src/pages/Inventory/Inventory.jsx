@@ -173,7 +173,9 @@ const Inventory = () => {
   };
 
   const getStockStatus = (producto) => {
-    const porcentaje = producto.stock_minimo > 0 ? (producto.stock_actual / producto.stock_minimo) * 100 : 100;
+    // Usar comparación simple stock_actual vs stock_minimo (sin cálculos ML pesados)
+    const stockMinimo = producto.stock_minimo || 5;
+    const porcentaje = stockMinimo > 0 ? (producto.stock_actual / stockMinimo) * 100 : 100;
     if (porcentaje < 50) return { color: 'text-red-600 bg-red-100', label: 'Crítico' };
     if (porcentaje < 100) return { color: 'text-yellow-600 bg-yellow-100', label: 'Bajo' };
     return { color: 'text-green-600 bg-green-100', label: 'Normal' };
@@ -314,6 +316,12 @@ const Inventory = () => {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Stock Mín.
                 </th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
+                  Precio Costo
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
+                  Precio Venta
+                </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
                   Estado
                 </th>
@@ -333,8 +341,14 @@ const Inventory = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {producto.stock_actual}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
                       {producto.stock_minimo}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">
+                      ${parseFloat(producto.precio_costo || 0).toLocaleString('es-CL')}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                      ${parseFloat(producto.precio_venta || 0).toLocaleString('es-CL')}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span

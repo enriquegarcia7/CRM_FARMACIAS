@@ -49,13 +49,19 @@ class ClienteSerializer(serializers.ModelSerializer):
         return value
 
     def get_total_compras(self, obj):
-        return obj.ventas.filter(estado='completada').count()
+        # Usar anotación del queryset si existe, sino calcular
+        if hasattr(obj, 'total_ventas'):
+            return obj.total_ventas
+        if hasattr(obj, 'total_compras'):
+            return obj.total_compras
+        return obj.ventas.filter(estado__codigo='completada').count()
 
     def get_monto_total(self, obj):
-        return sum(venta.total for venta in obj.ventas.filter(estado='completada'))
+        ventas = obj.ventas.filter(estado__codigo='completada')
+        return sum(venta.total for venta in ventas)
 
     def get_ultima_compra(self, obj):
-        ultima = obj.ventas.filter(estado='completada').order_by('-fecha').first()
+        ultima = obj.ventas.filter(estado__codigo='completada').order_by('-fecha').first()
         return ultima.fecha.date() if ultima else None
 
     def get_frecuencia(self, obj):
@@ -71,7 +77,36 @@ class TransaccionSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+class ProductoListSerializer(serializers.ModelSerializer):
+    """
+    Serializer LIGERO para listar productos sin cálculos pesados de ML.
+    Usa el stock_minimo fijo de la BD para comparaciones rápidas.
+    """
+    bajo_stock_simple = serializers.SerializerMethodField()
+    proveedor_nombre = serializers.CharField(source='proveedor_principal.nombre', read_only=True)
+    categoria_nombre = serializers.CharField(source='categoria.nombre', read_only=True)
+
+    class Meta:
+        model = Producto
+        fields = [
+            'id', 'codigo', 'nombre', 'descripcion',
+            'stock_actual', 'stock_minimo',
+            'precio_costo', 'precio_venta',
+            'activo', 'bajo_stock_simple',
+            'proveedor_nombre', 'categoria_nombre',
+            'fecha_registro'
+        ]
+
+    def get_bajo_stock_simple(self, obj):
+        """Comparación simple sin ML - usa stock_minimo fijo"""
+        return obj.stock_actual < obj.stock_minimo
+
+
 class ProductoSerializer(serializers.ModelSerializer):
+    """
+    Serializer COMPLETO con cálculos ML.
+    SOLO usar para detalle de un producto, NO para listas.
+    """
     bajo_stock = serializers.ReadOnlyField()
 
     class Meta:
@@ -280,11 +315,14 @@ class SugerenciaCompraSerializer(serializers.ModelSerializer):
 
 
 class DetalleVentaSerializer(serializers.ModelSerializer):
+    producto_codigo = serializers.CharField(source='producto.codigo', read_only=True)
+    producto_nombre = serializers.CharField(source='producto.nombre', read_only=True)
     producto_descripcion = serializers.CharField(source='producto.descripcion', read_only=True)
 
     class Meta:
         model = DetalleVenta
-        fields = '__all__'
+        fields = ['id', 'venta', 'producto', 'producto_codigo', 'producto_nombre',
+                  'producto_descripcion', 'cantidad', 'precio_unitario', 'subtotal']
 
 
 class VentaSerializer(serializers.ModelSerializer):

@@ -19,7 +19,7 @@ from config.secrets import (
 logger = logging.getLogger(__name__)
 
 # Configuración OAuth
-SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
 
 # URL de callback - debe coincidir con la configurada en Google Cloud Console
 REDIRECT_URI = os.getenv('GMAIL_REDIRECT_URI', 'http://localhost:8000/api/gmail/callback')

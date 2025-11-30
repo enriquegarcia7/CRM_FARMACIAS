@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, Upload, X, ChevronLeft, ChevronRight, Receipt, FileText } from 'lucide-react';
-import axios from 'axios';
-
-const API_BASE_URL = 'http://localhost:8000/api';
+import api from '../../services/api';
 
 const Sales = () => {
   const [ventas, setVentas] = useState([]);
@@ -35,7 +33,7 @@ const Sales = () => {
 
   const cargarUltimaCarga = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/ventas/ultima-carga/`);
+      const response = await api.get('/ventas/ultima-carga/');
       setUltimaCarga(response.data.fecha_ultima_carga);
     } catch (error) {
       console.error('Error cargando última carga:', error);
@@ -64,7 +62,7 @@ const Sales = () => {
 
       if (searchTerm) params.search = searchTerm;
 
-      const response = await axios.get(`${API_BASE_URL}/ventas/`, { params });
+      const response = await api.get('/ventas/', { params });
 
       setVentas(response.data.results || []);
       setTotalItems(response.data.count || 0);
@@ -105,7 +103,7 @@ const Sales = () => {
       const formData = new FormData();
       formData.append('archivo', uploadFile);
 
-      const response = await axios.post(`${API_BASE_URL}/ventas/cargar_excel/`, formData, {
+      const response = await api.post('/ventas/cargar_excel/', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -174,8 +172,8 @@ const Sales = () => {
       fecha: venta.fecha,
       clienteRut: venta.cliente,
       clienteNombre: venta.cliente_nombre,
-      codigo: detalle.producto,
-      producto: detalle.producto_descripcion,
+      codigo: detalle.producto_codigo || detalle.producto,
+      producto: detalle.producto_nombre || detalle.producto_descripcion || '',
       cantidad: detalle.cantidad,
       precioUnitario: detalle.precio_unitario,
       neto: detalle.subtotal,

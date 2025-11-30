@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (
     Cliente, Transaccion, Producto, Proveedor, Categoria, Laboratorio,
-    ProductoCatalogo, OfertaLaboratorio, SugerenciaCompra, Venta, DetalleVenta
+    ProductoCatalogo, OfertaLaboratorio, SugerenciaCompra, Venta, DetalleVenta,
+    MetodoPago, EstadoVenta
 )
 
 @admin.register(Cliente)
@@ -36,9 +37,10 @@ class LaboratorioAdmin(admin.ModelAdmin):
 
 @admin.register(Proveedor)
 class ProveedorAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'rut', 'telefono', 'email', 'activo')  # ✅ Cambiado 'correo' a 'email'
-    list_filter = ('activo',)
+    list_display = ('nombre', 'rut', 'telefono', 'email', 'monto_minimo_pedido', 'es_preferente', 'activo')
+    list_filter = ('activo', 'es_preferente')
     search_fields = ('nombre', 'rut')
+    list_editable = ('monto_minimo_pedido', 'es_preferente')
 
 @admin.register(ProductoCatalogo)
 class ProductoCatalogoAdmin(admin.ModelAdmin):
@@ -63,6 +65,22 @@ class SugerenciaCompraAdmin(admin.ModelAdmin):
 class DetalleVentaInline(admin.TabularInline):
     model = DetalleVenta
     extra = 1
+
+@admin.register(MetodoPago)
+class MetodoPagoAdmin(admin.ModelAdmin):
+    list_display = ('codigo', 'nombre', 'activo', 'orden', 'fecha_creacion')
+    list_filter = ('activo',)
+    search_fields = ('codigo', 'nombre')
+    list_editable = ('activo', 'orden')
+    ordering = ('orden', 'nombre')
+
+@admin.register(EstadoVenta)
+class EstadoVentaAdmin(admin.ModelAdmin):
+    list_display = ('codigo', 'nombre', 'color', 'es_final', 'activo', 'orden', 'fecha_creacion')
+    list_filter = ('activo', 'es_final')
+    search_fields = ('codigo', 'nombre')
+    list_editable = ('color', 'activo', 'orden')
+    ordering = ('orden', 'nombre')
 
 @admin.register(Venta)
 class VentaAdmin(admin.ModelAdmin):

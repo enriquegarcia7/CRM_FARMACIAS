@@ -272,7 +272,7 @@ class OfferETL:
                     nombre=offer_data.get('proveedor', 'Proveedor Desconocido'),
                     defaults={
                         'email': f"{offer_data.get('proveedor', 'proveedor').lower().replace(' ', '')}@proveedor.cl",
-                        'telefono': '+56900000000',
+                        'telefono': '',
                         'direccion': 'Por confirmar'
                     }
                 )

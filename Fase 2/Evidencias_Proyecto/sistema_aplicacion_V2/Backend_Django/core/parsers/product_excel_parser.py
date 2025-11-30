@@ -105,91 +105,149 @@ class ProductExcelParser:
     @transaction.atomic
     def _load_products(self, df):
         """
-        Carga productos en la base de datos.
-        ELIMINA todos los productos existentes y carga solo los del Excel actual.
+        Carga productos usando estrategia UPDATE + INSERT (sin eliminar).
 
-        IMPORTANTE:
-        - Limpia completamente la tabla de productos
-        - Solo inserta los productos del Excel actual
-        - Esto asegura que el inventario sea EXACTAMENTE el del Excel
+        ESTRATEGIA RÁPIDA:
+        1. Desactivar TODOS los productos existentes (UPDATE rápido)
+        2. Para cada producto del Excel: actualizar si existe, crear si no
+        3. Los productos del Excel quedan activos, los demás desactivados
+
+        Esto evita el DELETE en cascada que tardaba >90 segundos.
         """
         # Obtener o crear proveedor genérico
         proveedor_generico, _ = Proveedor.objects.get_or_create(
             nombre='Proveedor Genérico',
             defaults={
                 'email': 'generico@proveedor.cl',
-                'telefono': '+56900000000',
+                'telefono': '',
                 'direccion': 'Por confirmar'
             }
         )
 
-        # PASO 1: ELIMINAR todos los productos existentes
-        productos_eliminados = Producto.objects.all().count()
-        logger.info(f"🗑️ Eliminando {productos_eliminados} productos existentes...")
-        Producto.objects.all().delete()
-        logger.info("✅ Tabla de productos limpiada completamente")
+        # Obtener categoría General por defecto
+        categoria_general, _ = Categoria.objects.get_or_create(
+            nombre='General',
+            defaults={'activa': True}
+        )
 
-        # Timestamp de esta carga
-        ahora = timezone.now()
+        # PASO 1: Desactivar TODOS los productos (UPDATE es mucho más rápido que DELETE)
+        productos_existentes = Producto.objects.filter(activo=True).count()
+        logger.info(f"📦 Desactivando {productos_existentes} productos existentes...")
+        Producto.objects.all().update(activo=False)
+        logger.info("✅ Productos desactivados")
 
-        for index, row in df.iterrows():
+        # PASO 2: Preparar datos del Excel
+        logger.info(f"📊 Procesando {len(df)} filas del Excel...")
+        df = df.copy()
+
+        # Limpiar CODIGO
+        df['CODIGO'] = df['CODIGO'].astype(str).str.strip()
+        df = df[df['CODIGO'].notna() & (df['CODIGO'] != '') & (df['CODIGO'] != 'nan')]
+
+        # Eliminar duplicados
+        duplicados = df.duplicated(subset=['CODIGO'], keep='first')
+        if duplicados.sum() > 0:
+            logger.warning(f"⚠️ {duplicados.sum()} códigos duplicados ignorados")
+        df = df[~duplicados]
+
+        # Preparar columnas
+        df['PRODUCTO'] = df['PRODUCTO'].fillna('').astype(str).str.strip()
+        if 'NOMBRE_UNIT_IVA' in df.columns:
+            df['NOMBRE_UNIT_IVA'] = df['NOMBRE_UNIT_IVA'].fillna('').astype(str).str.strip()
+        else:
+            df['NOMBRE_UNIT_IVA'] = ''
+
+        df.loc[df['PRODUCTO'] == '', 'PRODUCTO'] = df.loc[df['PRODUCTO'] == '', 'NOMBRE_UNIT_IVA']
+        df.loc[df['PRODUCTO'] == '', 'PRODUCTO'] = df.loc[df['PRODUCTO'] == '', 'CODIGO']
+
+        if 'CÓDIGO DE BARRAS' in df.columns:
+            df['CODIGO_BARRAS'] = df['CÓDIGO DE BARRAS'].fillna('').astype(str).str.strip()
+        else:
+            df['CODIGO_BARRAS'] = ''
+
+        logger.info(f"✓ {len(df)} productos válidos")
+
+        # PASO 3: Obtener códigos existentes para saber cuáles actualizar vs crear
+        codigos_excel = set(df['CODIGO'].tolist())
+        productos_existentes_dict = {
+            p.codigo: p.id for p in Producto.objects.filter(codigo__in=codigos_excel).only('id', 'codigo')
+        }
+        logger.info(f"  → {len(productos_existentes_dict)} productos existentes a actualizar")
+        logger.info(f"  → {len(codigos_excel) - len(productos_existentes_dict)} productos nuevos a crear")
+
+        # PASO 4: Preparar listas para bulk operations
+        productos_a_crear = []
+        productos_a_actualizar = []
+        records = df.to_dict('records')
+
+        for row in records:
             try:
-                # Extraer datos
-                codigo = self._clean_string(row.get('CODIGO', ''))
-                if not codigo:
-                    self.stats['errores'].append(f"Fila {index + 2}: Código vacío")
-                    continue
-
-                # Nombre del producto (columna PRODUCTO)
-                nombre = self._clean_string(row.get('PRODUCTO', ''))
-                if not nombre:
-                    # Fallback a NOMBRE_UNIT_IVA si existe
-                    nombre = self._clean_string(row.get('NOMBRE_UNIT_IVA', ''))
-                if not nombre:
-                    nombre = codigo
-
-                # Descripción (usar NOMBRE_UNIT_IVA como descripción completa si existe)
-                descripcion = self._clean_string(row.get('NOMBRE_UNIT_IVA', nombre))
-
-                # Precios
-                precio_unitario = self._parse_precio(row.get('PREC UNITARIO', 0))
-                precio_venta = self._parse_precio(row.get('PREC UNIDADES', precio_unitario))
-
-                # Stock
+                codigo = str(row.get('CODIGO', '')).strip()[:50]
+                nombre = str(row.get('PRODUCTO', codigo)).strip()[:200]
+                descripcion = str(row.get('NOMBRE_UNIT_IVA', nombre)).strip()[:500]
+                codigo_barras = str(row.get('CODIGO_BARRAS', '')).strip()[:50]
+                precio_costo = self._parse_precio(row.get('PREC UNITARIO', 0))
+                precio_venta = self._parse_precio(row.get('PREC UNIDADES', precio_costo))
                 stock_actual = self._parse_int(row.get('STOCK', 0))
 
-                # Código de barras (opcional)
-                codigo_barras = self._clean_string(row.get('CÓDIGO DE BARRAS', ''))
-
-                # Obtener categoría General por defecto
-                categoria_general, _ = Categoria.objects.get_or_create(
-                    nombre='General',
-                    defaults={'activa': True}
-                )
-
-                # Crear nuevo producto (la tabla fue limpiada, todos son nuevos)
-                Producto.objects.create(
-                    codigo=codigo,
-                    nombre=nombre,
-                    descripcion=descripcion,
-                    categoria=categoria_general,
-                    codigo_barras=codigo_barras,
-                    stock_actual=stock_actual,
-                    stock_minimo=10,  # Valor por defecto
-                    precio_venta=precio_venta,
-                    precio_costo=precio_unitario,
-                    proveedor_principal=proveedor_generico,
-                    activo=True
-                )
-
-                self.stats['insertados'] += 1
-                logger.debug(f"✅ Insertado: {codigo} - {nombre}")
-
+                if codigo in productos_existentes_dict:
+                    # Producto existe - preparar para UPDATE
+                    productos_a_actualizar.append({
+                        'id': productos_existentes_dict[codigo],
+                        'codigo': codigo,
+                        'nombre': nombre,
+                        'descripcion': descripcion,
+                        'codigo_barras': codigo_barras,
+                        'stock_actual': stock_actual,
+                        'precio_costo': precio_costo,
+                        'precio_venta': precio_venta,
+                        'activo': True
+                    })
+                else:
+                    # Producto nuevo - preparar para INSERT
+                    productos_a_crear.append(Producto(
+                        codigo=codigo,
+                        nombre=nombre,
+                        descripcion=descripcion,
+                        categoria=categoria_general,
+                        codigo_barras=codigo_barras,
+                        stock_actual=stock_actual,
+                        stock_minimo=10,
+                        precio_venta=precio_venta,
+                        precio_costo=precio_costo,
+                        proveedor_principal=proveedor_generico,
+                        activo=True
+                    ))
             except Exception as e:
-                error_msg = f"Fila {index + 2}: {str(e)}"
-                self.stats['errores'].append(error_msg)
-                logger.error(f"❌ {error_msg}")
-                continue
+                self.stats['errores'].append(f"Error: {str(e)[:50]}")
+
+        # PASO 5: Ejecutar bulk UPDATE para productos existentes
+        if productos_a_actualizar:
+            logger.info(f"⚡ Actualizando {len(productos_a_actualizar)} productos existentes...")
+            # Actualizar en lotes usando UPDATE directo
+            for i in range(0, len(productos_a_actualizar), 500):
+                batch = productos_a_actualizar[i:i+500]
+                for prod_data in batch:
+                    Producto.objects.filter(id=prod_data['id']).update(
+                        nombre=prod_data['nombre'],
+                        descripcion=prod_data['descripcion'],
+                        codigo_barras=prod_data['codigo_barras'],
+                        stock_actual=prod_data['stock_actual'],
+                        precio_costo=prod_data['precio_costo'],
+                        precio_venta=prod_data['precio_venta'],
+                        activo=True
+                    )
+            self.stats['actualizados'] = len(productos_a_actualizar)
+            logger.info(f"✓ {len(productos_a_actualizar)} productos actualizados")
+
+        # PASO 6: Ejecutar bulk INSERT para productos nuevos
+        if productos_a_crear:
+            logger.info(f"⚡ Insertando {len(productos_a_crear)} productos nuevos...")
+            Producto.objects.bulk_create(productos_a_crear, ignore_conflicts=True, batch_size=1000)
+            self.stats['insertados'] = len(productos_a_crear)
+            logger.info(f"✓ {len(productos_a_crear)} productos creados")
+
+        logger.info(f"✅ Carga completada: {self.stats['actualizados']} actualizados, {self.stats['insertados']} nuevos")
 
     def _inferir_principio_activo(self, codigo, nombre):
         """

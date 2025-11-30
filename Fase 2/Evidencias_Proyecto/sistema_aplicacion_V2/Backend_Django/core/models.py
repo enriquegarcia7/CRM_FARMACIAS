@@ -8,6 +8,21 @@ class Cliente(models.Model):
     telefono = models.CharField(max_length=20, blank=True, null=True)
     direccion = models.TextField(blank=True, null=True)
     fecha_registro = models.DateTimeField(auto_now_add=True)
+    ultima_oferta_enviada = models.DateTimeField(null=True, blank=True, help_text="Fecha/hora del último envío de oferta")
+
+    @property
+    def total_compras(self):
+        """Retorna el número total de compras/ventas del cliente"""
+        return self.ventas.count()
+
+    @property
+    def tipo_cliente(self):
+        """
+        Calcula dinámicamente el tipo de cliente basado en sus compras.
+        - 'frecuente': 5 o más compras
+        - 'general': menos de 5 compras
+        """
+        return 'frecuente' if self.total_compras >= 5 else 'general'
 
     def __str__(self):
         if self.rut:
@@ -31,6 +46,50 @@ class Transaccion(models.Model):
 
 
 # Nuevos modelos para SmartPharm
+
+class MetodoPago(models.Model):
+    """
+    Métodos de pago disponibles en el sistema.
+    Permite gestión dinámica sin modificar código.
+    """
+    codigo = models.CharField(max_length=50, unique=True, help_text="Código interno (ej: efectivo, tarjeta)")
+    nombre = models.CharField(max_length=100, help_text="Nombre visible (ej: Efectivo, Tarjeta de Crédito)")
+    descripcion = models.TextField(blank=True)
+    activo = models.BooleanField(default=True)
+    orden = models.IntegerField(default=0, help_text="Orden de visualización")
+    fecha_creacion = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Método de Pago"
+        verbose_name_plural = "Métodos de Pago"
+        ordering = ['orden', 'nombre']
+
+    def __str__(self):
+        return self.nombre
+
+
+class EstadoVenta(models.Model):
+    """
+    Estados posibles de una venta.
+    Permite gestión dinámica sin modificar código.
+    """
+    codigo = models.CharField(max_length=20, unique=True, help_text="Código interno (ej: completada, pendiente)")
+    nombre = models.CharField(max_length=100, help_text="Nombre visible (ej: Completada, Pendiente)")
+    descripcion = models.TextField(blank=True)
+    es_final = models.BooleanField(default=False, help_text="Indica si es un estado final (no puede cambiar)")
+    color = models.CharField(max_length=20, blank=True, help_text="Color para UI (ej: green, yellow, red)")
+    activo = models.BooleanField(default=True)
+    orden = models.IntegerField(default=0, help_text="Orden de visualización")
+    fecha_creacion = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Estado de Venta"
+        verbose_name_plural = "Estados de Venta"
+        ordering = ['orden', 'nombre']
+
+    def __str__(self):
+        return self.nombre
+
 
 class Categoria(models.Model):
     """
@@ -145,6 +204,16 @@ class Proveedor(models.Model):
     telefono = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)  # ✅ Campo único, eliminamos duplicado "correo"
     direccion = models.TextField(blank=True)
+    monto_minimo_pedido = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Monto mínimo de pedido en CLP (0 = sin mínimo)"
+    )
+    es_preferente = models.BooleanField(
+        default=False,
+        help_text="Marcar como proveedor preferente en caso de empate de precios"
+    )
     activo = models.BooleanField(default=True)
     fecha_registro = models.DateTimeField(default=timezone.now)
 
@@ -415,16 +484,39 @@ class Venta(models.Model):
     cliente = models.ForeignKey(Cliente, on_delete=models.CASCADE, related_name='ventas')
     fecha = models.DateTimeField(default=timezone.now)
     total = models.DecimalField(max_digits=12, decimal_places=2)
-    metodo_pago = models.CharField(max_length=50, choices=[
-        ('efectivo', 'Efectivo'),
-        ('tarjeta', 'Tarjeta'),
-        ('transferencia', 'Transferencia'),
-    ])
-    estado = models.CharField(max_length=20, choices=[
-        ('completada', 'Completada'),
-        ('pendiente', 'Pendiente'),
-        ('cancelada', 'Cancelada'),
-    ], default='completada')
+
+    # NUEVO: Usar ForeignKey en lugar de CharField con choices
+    metodo_pago = models.ForeignKey(
+        'MetodoPago',
+        on_delete=models.PROTECT,
+        related_name='ventas',
+        null=True,
+        blank=True,
+        help_text="Método de pago utilizado"
+    )
+    # Campo legacy para migración gradual (mantener temporalmente)
+    metodo_pago_legacy = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Campo legacy - usar metodo_pago (FK)"
+    )
+
+    estado = models.ForeignKey(
+        'EstadoVenta',
+        on_delete=models.PROTECT,
+        related_name='ventas',
+        null=True,
+        blank=True,
+        help_text="Estado actual de la venta"
+    )
+    # Campo legacy para migración gradual (mantener temporalmente)
+    estado_legacy = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Campo legacy - usar estado (FK)"
+    )
     hash_unico = models.CharField(
         max_length=64,
         unique=True,

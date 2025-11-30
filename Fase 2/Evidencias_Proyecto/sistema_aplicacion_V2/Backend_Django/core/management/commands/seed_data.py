@@ -165,7 +165,7 @@ class Command(BaseCommand):
                     fecha=fecha,
                     total=Decimal('0'),
                     metodo_pago=random.choice(['efectivo', 'tarjeta', 'transferencia']),
-                    estado='completada'
+                    estado__codigo='completada'
                 )
 
                 # 1-5 productos por venta

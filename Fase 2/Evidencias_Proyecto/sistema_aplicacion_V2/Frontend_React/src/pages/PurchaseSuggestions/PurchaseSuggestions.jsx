@@ -1,119 +1,122 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   AlertTriangle,
   Sun,
   Activity,
   TrendingUp,
   Download,
-  FileSpreadsheet,
-  Upload
+  RefreshCw,
+  ShoppingCart,
+  Package,
+  ChevronLeft,
+  ChevronRight,
+  Filter
 } from 'lucide-react';
-import { sugerenciasService, ofertasService } from '../../services/api';
+import { sugerenciasService } from '../../services/api';
+
+// Skeleton para carga
+const SkeletonRow = () => (
+  <tr className="animate-pulse">
+    <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-3/4"></div></td>
+    <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-16"></div></td>
+    <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-16"></div></td>
+    <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-20"></div></td>
+    <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-24"></div></td>
+    <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-20"></div></td>
+  </tr>
+);
+
+const SkeletonCard = () => (
+  <div className="bg-gray-100 rounded-lg shadow p-6 animate-pulse">
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="h-4 bg-gray-300 rounded w-24 mb-2"></div>
+        <div className="h-8 bg-gray-300 rounded w-16 mt-2"></div>
+        <div className="h-3 bg-gray-300 rounded w-32 mt-2"></div>
+      </div>
+      <div className="h-10 w-10 bg-gray-300 rounded-full"></div>
+    </div>
+  </div>
+);
 
 const PurchaseSuggestions = () => {
-  const [sugerencias, setSugerencias] = useState({
-    bajoStock: [],
-    estacionales: [],
-    epidemiologicas: [],
-  });
-  const [ofertas, setOfertas] = useState([]);
+  const [sugerencias, setSugerencias] = useState([]);
+  const [conteos, setConteos] = useState({ bajo_stock: 0, estacional: 0, epidemiologico: 0, total: 0 });
+  const [pagination, setPagination] = useState({ page: 1, page_size: 50, total_items: 0, total_pages: 0 });
+  const [activeTab, setActiveTab] = useState('bajo_stock');
   const [loading, setLoading] = useState(true);
+  const [loadingGenerar, setLoadingGenerar] = useState(false);
   const [error, setError] = useState(null);
-  const [archivo, setArchivo] = useState(null);
+  const [consolidado, setConsolidado] = useState(null);
 
-  useEffect(() => {
-    cargarDatos();
-  }, []);
-
-  const cargarDatos = async () => {
+  const cargarSugerencias = useCallback(async (tipo = activeTab, page = 1) => {
     try {
       setLoading(true);
       setError(null);
 
-      // Llamadas paralelas a los 4 endpoints del backend
-      const [bajoStockRes, estacionalesRes, epidemiologicasRes, ofertasRes] = await Promise.all([
-        sugerenciasService.getByLowStock(),
-        sugerenciasService.getBySeason(),
-        sugerenciasService.getByEpidemiological(),
-        ofertasService.getActive()
-      ]);
-
-      // Mapear respuestas del backend al formato esperado por el frontend
-      setSugerencias({
-        bajoStock: bajoStockRes.data.map(item => ({
-          id: item.id,
-          producto: item.producto?.descripcion || item.producto?.nombre || 'Producto sin nombre',
-          stockActual: item.producto?.stock_actual || 0,
-          stockMinimo: item.producto?.stock_minimo || 0,
-          cantidadSugerida: item.cantidad_sugerida,
-          proveedor: item.proveedor?.nombre || 'Sin proveedor',
-          precioUnitario: item.producto?.precio_costo || 0,
-          prioridad: item.prioridad || 'media'
-        })),
-        estacionales: estacionalesRes.data.map(item => ({
-          id: item.id,
-          producto: item.producto?.descripcion || item.producto?.nombre || 'Producto sin nombre',
-          razon: item.razon || 'Temporada actual',
-          cantidadSugerida: item.cantidad_sugerida,
-          proveedor: item.proveedor?.nombre || 'Sin proveedor',
-          precioUnitario: item.producto?.precio_costo || 0,
-          confianza: item.confianza || 0.75
-        })),
-        epidemiologicas: epidemiologicasRes.data.map(item => ({
-          id: item.id,
-          producto: item.producto?.descripcion || item.producto?.nombre || 'Producto sin nombre',
-          razon: item.razon || 'Alerta sanitaria',
-          fuente: item.fuente || 'MINSAL Chile',
-          cantidadSugerida: item.cantidad_sugerida,
-          proveedor: item.proveedor?.nombre || 'Sin proveedor',
-          precioUnitario: item.producto?.precio_costo || 0,
-          urgencia: item.prioridad || 'media'
-        }))
+      const response = await sugerenciasService.getTodas({
+        tipo: tipo,
+        page: page,
+        page_size: 50
       });
 
-      // Mapear ofertas de laboratorios
-      setOfertas(ofertasRes.data.map(oferta => ({
-        id: oferta.id,
-        laboratorio: oferta.proveedor?.nombre || 'Laboratorio',
-        producto: oferta.producto?.descripcion || oferta.producto?.nombre || 'Producto',
-        descuento: `${oferta.descuento_porcentaje}%`,
-        precioNormal: oferta.precio_normal,
-        precioOferta: oferta.precio_oferta,
-        vigencia: oferta.fecha_vigencia
-      })));
+      setSugerencias(response.data.results || []);
+      setConteos(response.data.conteos || { bajo_stock: 0, estacional: 0, epidemiologico: 0, total: 0 });
+      setPagination(response.data.pagination || { page: 1, page_size: 50, total_items: 0, total_pages: 0 });
 
-    } catch (error) {
-      console.error('Error cargando sugerencias:', error);
-      setError(error.response?.data?.message || error.message || 'Error al cargar sugerencias de compra');
+    } catch (err) {
+      console.error('Error cargando sugerencias:', err);
+      setError(err.response?.data?.message || err.message || 'Error al cargar sugerencias');
     } finally {
       setLoading(false);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    cargarSugerencias(activeTab, 1);
+  }, [activeTab]);
+
+  const cargarConsolidado = async () => {
+    try {
+      const response = await sugerenciasService.consolidar();
+      if (response.data?.consolidado) {
+        setConsolidado(response.data.consolidado);
+      }
+    } catch (err) {
+      console.warn('No se pudo cargar consolidado:', err);
+    }
+  };
+
+  const generarSugerencias = async () => {
+    try {
+      setLoadingGenerar(true);
+      const response = await sugerenciasService.generar({ limite: 100, forzar_mapeo: true });
+
+      if (response.data.success) {
+        alert(`✅ Sugerencias generadas exitosamente\n\n📊 Estadísticas:\n- Productos críticos: ${response.data.estadisticas.total_criticos}\n- Sugerencias creadas: ${response.data.estadisticas.sugerencias_creadas}`);
+        await cargarSugerencias(activeTab, 1);
+        await cargarConsolidado();
+      }
+    } catch (err) {
+      console.error('Error generando sugerencias:', err);
+      alert('Error al generar sugerencias: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setLoadingGenerar(false);
+    }
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+  };
+
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && newPage <= pagination.total_pages) {
+      cargarSugerencias(activeTab, newPage);
     }
   };
 
   const formatCurrency = (value) => {
-    return new Intl.NumberFormat('es-CL', {
-      style: 'currency',
-      currency: 'CLP',
-    }).format(value);
-  };
-
-  const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('es-CL');
-  };
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setArchivo(file);
-      // Aquí se procesará el archivo Excel/PDF con ETL
-      alert(`Archivo "${file.name}" cargado. Procesando ofertas de laboratorios...`);
-      // Implementar lógica de ETL
-    }
-  };
-
-  const generarOrdenCompra = (sugerencias) => {
-    alert(`Generando orden de compra para ${sugerencias.length} productos...`);
-    // Implementar lógica de generación de orden de compra
+    return new Intl.NumberFormat('es-CL', { style: 'currency', currency: 'CLP' }).format(value || 0);
   };
 
   const getPrioridadColor = (prioridad) => {
@@ -125,291 +128,312 @@ const PurchaseSuggestions = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        <span className="ml-4 text-xl text-gray-600">Cargando sugerencias...</span>
-      </div>
-    );
-  }
+  const tabs = [
+    { id: 'bajo_stock', label: 'Bajo Stock', icon: AlertTriangle, color: 'red', count: conteos.bajo_stock },
+    { id: 'estacional', label: 'Estacionales', icon: Sun, color: 'orange', count: conteos.estacional },
+    { id: 'epidemiologico', label: 'Epidemiológicas', icon: Activity, color: 'blue', count: conteos.epidemiologico },
+  ];
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-8 max-w-md">
-          <div className="flex items-center mb-4">
-            <svg className="w-8 h-8 text-red-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <h3 className="text-lg font-semibold text-red-800">Error al cargar sugerencias</h3>
-          </div>
-          <p className="text-red-600 mb-4">{error}</p>
-          <button
-            onClick={cargarDatos}
-            className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 transition-colors"
-          >
-            Reintentar
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const descargarExcelProveedor = async (nombreProveedor) => {
+    try {
+      const response = await sugerenciasService.exportExcel({ proveedor: nombreProveedor });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `orden_compra_${nombreProveedor}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Error al generar Excel: ' + (err.response?.data?.message || err.message));
+    }
+  };
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-800">Sugerencias de Compra Inteligente</h1>
-        <button
-          onClick={() => generarOrdenCompra([...sugerencias.bajoStock, ...sugerencias.estacionales, ...sugerencias.epidemiologicas])}
-          className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          <Download size={20} />
-          Generar Orden de Compra
-        </button>
+        <h1 className="text-3xl font-bold text-gray-800">Sugerencias de Compra</h1>
+        <div className="flex gap-3">
+          <button
+            onClick={generarSugerencias}
+            disabled={loadingGenerar}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            {loadingGenerar ? (
+              <><RefreshCw size={20} className="animate-spin" /> Generando...</>
+            ) : (
+              <><RefreshCw size={20} /> Generar Sugerencias</>
+            )}
+          </button>
+          <button
+            onClick={cargarConsolidado}
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
+          >
+            <ShoppingCart size={20} /> Ver Consolidado
+          </button>
+        </div>
       </div>
 
-      {/* Tarjetas de resumen */}
+      {/* Tarjetas de resumen con conteos */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-red-50 border-l-4 border-red-500 rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-red-800 font-semibold">Bajo Stock</p>
-              <p className="text-3xl font-bold text-red-900 mt-2">
-                {sugerencias.bajoStock.length}
-              </p>
-              <p className="text-sm text-red-700 mt-1">productos críticos</p>
-            </div>
-            <AlertTriangle size={40} className="text-red-500" />
-          </div>
-        </div>
+        {loading ? (
+          <>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </>
+        ) : (
+          tabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            const colorClasses = {
+              red: { bg: 'bg-red-50', border: 'border-red-500', text: 'text-red-800', count: 'text-red-900', icon: 'text-red-500' },
+              orange: { bg: 'bg-orange-50', border: 'border-orange-500', text: 'text-orange-800', count: 'text-orange-900', icon: 'text-orange-500' },
+              blue: { bg: 'bg-blue-50', border: 'border-blue-500', text: 'text-blue-800', count: 'text-blue-900', icon: 'text-blue-500' },
+            }[tab.color];
 
-        <div className="bg-orange-50 border-l-4 border-orange-500 rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-orange-800 font-semibold">Estacionales</p>
-              <p className="text-3xl font-bold text-orange-900 mt-2">
-                {sugerencias.estacionales.length}
-              </p>
-              <p className="text-sm text-orange-700 mt-1">por temporada (ML)</p>
-            </div>
-            <Sun size={40} className="text-orange-500" />
-          </div>
-        </div>
-
-        <div className="bg-blue-50 border-l-4 border-blue-500 rounded-lg shadow p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-blue-800 font-semibold">Epidemiológicas</p>
-              <p className="text-3xl font-bold text-blue-900 mt-2">
-                {sugerencias.epidemiologicas.length}
-              </p>
-              <p className="text-sm text-blue-700 mt-1">según MINSAL</p>
-            </div>
-            <Activity size={40} className="text-blue-500" />
-          </div>
-        </div>
-      </div>
-
-      {/* Carga de ofertas de laboratorios */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet size={24} className="text-blue-600" />
-            <h2 className="text-xl font-semibold">Ofertas de Laboratorios (ETL)</h2>
-          </div>
-          <label className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg cursor-pointer transition-colors">
-            <Upload size={20} />
-            Cargar Excel/PDF
-            <input
-              type="file"
-              accept=".xlsx,.xls,.pdf"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-          </label>
-        </div>
-        <p className="text-sm text-gray-600 mb-4">
-          El sistema procesará automáticamente las ofertas cada 3 días. Última actualización: Hace 2 días
-        </p>
-
-        {ofertas.length > 0 && (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Laboratorio</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Descuento</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Precio Normal</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Precio Oferta</th>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vigencia</th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {ofertas.map((oferta) => (
-                  <tr key={oferta.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{oferta.laboratorio}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">{oferta.producto}</td>
-                    <td className="px-4 py-3 text-sm">
-                      <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-semibold">
-                        {oferta.descuento}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500 line-through">{formatCurrency(oferta.precioNormal)}</td>
-                    <td className="px-4 py-3 text-sm font-bold text-green-600">{formatCurrency(oferta.precioOferta)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{formatDate(oferta.vigencia)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            return (
+              <button
+                key={tab.id}
+                onClick={() => handleTabChange(tab.id)}
+                className={`${colorClasses.bg} border-l-4 ${colorClasses.border} rounded-lg shadow p-6 text-left transition-all hover:shadow-lg ${isActive ? 'ring-2 ring-offset-2 ring-' + tab.color + '-500' : ''}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className={`${colorClasses.text} font-semibold`}>{tab.label}</p>
+                    <p className={`text-3xl font-bold ${colorClasses.count} mt-2`}>{tab.count}</p>
+                    <p className={`text-sm ${colorClasses.text} mt-1`}>
+                      {isActive ? 'Mostrando' : 'Click para ver'}
+                    </p>
+                  </div>
+                  <Icon size={40} className={colorClasses.icon} />
+                </div>
+              </button>
+            );
+          })
         )}
       </div>
 
-      {/* Sugerencias por Bajo Stock */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <AlertTriangle size={24} className="text-red-600" />
-            <h2 className="text-xl font-semibold">Sugerencias por Bajo Stock</h2>
-          </div>
-          <p className="text-sm text-gray-600 mt-1">Productos que requieren reposición urgente</p>
+      {/* Error */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+          <AlertTriangle className="text-red-500" />
+          <span className="text-red-700">{error}</span>
+          <button onClick={() => cargarSugerencias(activeTab, 1)} className="ml-auto text-red-600 hover:text-red-800 font-medium">
+            Reintentar
+          </button>
         </div>
+      )}
+
+      {/* Tabla de sugerencias */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {tabs.find(t => t.id === activeTab)?.icon && (
+              <div className={`text-${tabs.find(t => t.id === activeTab)?.color}-600`}>
+                {(() => { const Icon = tabs.find(t => t.id === activeTab)?.icon; return <Icon size={24} />; })()}
+              </div>
+            )}
+            <h2 className="text-xl font-semibold">
+              {tabs.find(t => t.id === activeTab)?.label}
+            </h2>
+            <span className="text-sm text-gray-500 ml-2">
+              ({pagination.total_items} sugerencias)
+            </span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <span>Página {pagination.page} de {pagination.total_pages || 1}</span>
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock Actual</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock Mínimo</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cant. Sugerida</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Precio Unit.</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prioridad</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  {activeTab === 'estacional' ? 'Confianza' : 'Prioridad'}
+                </th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {sugerencias.bajoStock.map((item) => (
-                <tr key={item.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.producto}</td>
-                  <td className="px-6 py-4 text-sm text-red-600 font-semibold">{item.stockActual}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{item.stockMinimo}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-blue-600">{item.cantidadSugerida}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{item.proveedor}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{formatCurrency(item.precioUnitario)}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">
-                    {formatCurrency(item.cantidadSugerida * item.precioUnitario)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPrioridadColor(item.prioridad)}`}>
-                      {item.prioridad.toUpperCase()}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Sugerencias Estacionales (ML) */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <Sun size={24} className="text-orange-600" />
-            <h2 className="text-xl font-semibold">Sugerencias Estacionales (Machine Learning)</h2>
-          </div>
-          <p className="text-sm text-gray-600 mt-1">Predicciones basadas en patrones históricos y estación del año</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Razón</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cant. Sugerida</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Precio Unit.</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Confianza</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {sugerencias.estacionales.map((item) => (
-                <tr key={item.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.producto}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{item.razon}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-blue-600">{item.cantidadSugerida}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{item.proveedor}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{formatCurrency(item.precioUnitario)}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">
-                    {formatCurrency(item.cantidadSugerida * item.precioUnitario)}
-                  </td>
-                  <td className="px-6 py-4 text-sm">
-                    <div className="flex items-center">
-                      <TrendingUp size={16} className="text-green-600 mr-1" />
-                      <span className="font-semibold text-green-600">{(item.confianza * 100).toFixed(0)}%</span>
+              {loading ? (
+                [...Array(10)].map((_, i) => <SkeletonRow key={i} />)
+              ) : sugerencias.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                    <div className="flex flex-col items-center gap-3">
+                      <Filter size={48} className="text-gray-300" />
+                      <p className="text-lg font-medium">No hay sugerencias en esta categoría</p>
+                      <p className="text-sm">Haz clic en "Generar Sugerencias" para analizar tu inventario</p>
                     </div>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                sugerencias.map((item) => (
+                  <tr key={item.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {item.producto?.nombre || item.producto?.descripcion || 'Sin nombre'}
+                        </p>
+                        <p className="text-xs text-gray-500">{item.producto?.codigo}</p>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-red-600 font-semibold">
+                      {item.producto?.stock_actual || 0}
+                    </td>
+                    <td className="px-6 py-4 text-sm font-semibold text-blue-600">
+                      {item.cantidad_sugerida}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      {item.proveedor_recomendado?.nombre || 'Sin proveedor'}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">
+                      {formatCurrency(item.precio_unitario)}
+                      {item.tiene_oferta && (
+                        <span className="ml-2 bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs">
+                          -{item.descuento_porcentaje}%
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-sm font-semibold text-gray-900">
+                      {formatCurrency(item.cantidad_sugerida * (item.precio_unitario || 0))}
+                    </td>
+                    <td className="px-6 py-4">
+                      {activeTab === 'estacional' ? (
+                        <div className="flex items-center">
+                          <TrendingUp size={16} className="text-green-600 mr-1" />
+                          <span className="font-semibold text-green-600">
+                            {((item.confianza_ml || 0) * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      ) : (
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPrioridadColor(item.prioridad)}`}>
+                          {(item.prioridad || 'media').toUpperCase()}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
+
+        {/* Paginación */}
+        {pagination.total_pages > 1 && (
+          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
+            <div className="text-sm text-gray-600">
+              Mostrando {((pagination.page - 1) * pagination.page_size) + 1} - {Math.min(pagination.page * pagination.page_size, pagination.total_items)} de {pagination.total_items}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => handlePageChange(pagination.page - 1)}
+                disabled={!pagination.has_previous}
+                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft size={20} />
+              </button>
+
+              {/* Números de página */}
+              <div className="flex gap-1">
+                {[...Array(Math.min(5, pagination.total_pages))].map((_, i) => {
+                  let pageNum;
+                  if (pagination.total_pages <= 5) {
+                    pageNum = i + 1;
+                  } else if (pagination.page <= 3) {
+                    pageNum = i + 1;
+                  } else if (pagination.page >= pagination.total_pages - 2) {
+                    pageNum = pagination.total_pages - 4 + i;
+                  } else {
+                    pageNum = pagination.page - 2 + i;
+                  }
+
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => handlePageChange(pageNum)}
+                      className={`px-3 py-1 rounded-lg text-sm font-medium ${
+                        pagination.page === pageNum
+                          ? 'bg-blue-600 text-white'
+                          : 'border border-gray-300 hover:bg-gray-100'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => handlePageChange(pagination.page + 1)}
+                disabled={!pagination.has_next}
+                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Sugerencias Epidemiológicas (MINSAL) */}
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center gap-2">
-            <Activity size={24} className="text-blue-600" />
-            <h2 className="text-xl font-semibold">Sugerencias Epidemiológicas (MINSAL)</h2>
+      {/* Consolidado por proveedor */}
+      {consolidado && Object.keys(consolidado).length > 0 && (
+        <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg shadow-lg p-6 border-2 border-purple-200">
+          <div className="flex items-center gap-3 mb-6">
+            <ShoppingCart size={28} className="text-purple-600" />
+            <div>
+              <h2 className="text-2xl font-bold text-purple-900">Órdenes de Compra Consolidadas</h2>
+              <p className="text-sm text-purple-700">Agrupadas por proveedor con selección del mejor precio</p>
+            </div>
           </div>
-          <p className="text-sm text-gray-600 mt-1">Basadas en alertas sanitarias y tendencias epidemiológicas actuales</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Object.entries(consolidado).map(([proveedorNombre, data]) => (
+              <div key={proveedorNombre} className="bg-white rounded-lg shadow-md border overflow-hidden">
+                <div className={`p-4 ${data.cumple_minimo ? 'bg-green-50' : 'bg-red-50'}`}>
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">{proveedorNombre}</h3>
+                      <p className="text-sm text-gray-600">{data.sugerencias?.length || 0} productos</p>
+                    </div>
+                    <Package size={20} className="text-gray-500" />
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-sm text-gray-600">Total:</span>
+                      <span className="text-xl font-bold">{formatCurrency(data.total)}</span>
+                    </div>
+                    {data.cumple_minimo ? (
+                      <div className="text-green-700 text-sm font-medium">✓ Cumple mínimo</div>
+                    ) : (
+                      <div className="text-red-700 text-sm font-medium">
+                        ⚠ Falta {formatCurrency(data.minimo_requerido - data.total)}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => descargarExcelProveedor(proveedorNombre)}
+                    className="mt-3 w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
+                  >
+                    <Download size={16} /> Descargar Excel
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Razón / Alerta</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fuente</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cant. Sugerida</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Precio Unit.</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Urgencia</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {sugerencias.epidemiologicas.map((item) => (
-                <tr key={item.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-medium text-gray-900">{item.producto}</td>
-                  <td className="px-6 py-4 text-sm text-gray-600">{item.razon}</td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-semibold">
-                      {item.fuente}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-semibold text-blue-600">{item.cantidadSugerida}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{item.proveedor}</td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{formatCurrency(item.precioUnitario)}</td>
-                  <td className="px-6 py-4 text-sm font-semibold text-gray-900">
-                    {formatCurrency(item.cantidadSugerida * item.precioUnitario)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPrioridadColor(item.urgencia)}`}>
-                      {item.urgencia.toUpperCase()}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
     </div>
   );
 };
