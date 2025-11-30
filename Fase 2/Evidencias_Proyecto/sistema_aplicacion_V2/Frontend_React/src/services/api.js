@@ -35,11 +35,14 @@ api.interceptors.response.use(
 // Servicios para Clientes
 export const clientesService = {
   getAll: (params = {}) => {
-    // params: { page, page_size }
+    // params: { page, page_size, search, tipo, ordering }
     const queryParams = new URLSearchParams();
 
     if (params.page) queryParams.append('page', params.page);
     if (params.page_size) queryParams.append('page_size', params.page_size);
+    if (params.search) queryParams.append('search', params.search);
+    if (params.tipo) queryParams.append('tipo', params.tipo);
+    if (params.ordering) queryParams.append('ordering', params.ordering);
 
     const queryString = queryParams.toString();
     return api.get(`/clientes/${queryString ? `?${queryString}` : ''}`);
@@ -65,13 +68,14 @@ export const transaccionesService = {
 // Servicios para Productos
 export const productosService = {
   getAll: (params = {}) => {
-    // params: { page, page_size, search, filtro_stock }
+    // params: { page, page_size, search, filtro_stock, ordering }
     const queryParams = new URLSearchParams();
 
     if (params.page) queryParams.append('page', params.page);
     if (params.page_size) queryParams.append('page_size', params.page_size);
     if (params.search) queryParams.append('search', params.search);
     if (params.filtro_stock) queryParams.append('filtro_stock', params.filtro_stock);
+    if (params.ordering) queryParams.append('ordering', params.ordering);
 
     const queryString = queryParams.toString();
     return api.get(`/productos/${queryString ? `?${queryString}` : ''}`);
@@ -126,12 +130,13 @@ export const sugerenciasService = {
 export const ofertasService = {
   getAll: () => api.get('/ofertas/'),
   getPorLaboratorio: (params = {}) => {
-    // params: { page, page_size, laboratorio, activas, search }
+    // params: { page, page_size, laboratorio, proveedor, activas, search }
     const queryParams = new URLSearchParams();
 
     if (params.page) queryParams.append('page', params.page);
     if (params.page_size) queryParams.append('page_size', params.page_size);
     if (params.laboratorio) queryParams.append('laboratorio', params.laboratorio);
+    if (params.proveedor) queryParams.append('proveedor', params.proveedor);
     if (params.search) queryParams.append('search', params.search);
 
     // Default activas = true
@@ -141,6 +146,7 @@ export const ofertasService = {
     return api.get(`/ofertas/por_laboratorio/?${queryParams.toString()}`);
   },
   getLaboratorios: () => api.get('/ofertas/laboratorios/'),
+  getProveedores: () => api.get('/ofertas/proveedores/'),
   procesarArchivo: (formData) => api.post('/ofertas/procesar/', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   }),

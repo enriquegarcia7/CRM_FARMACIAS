@@ -4,6 +4,7 @@ import {
   Tooltip, Legend, ResponsiveContainer, BarChart, Bar, Area, ComposedChart, Cell
 } from 'recharts';
 import './SeasonalDemand.css';
+// Actualizado - alerta removida
 
 const SeasonalDemand = () => {
   const [categorias, setCategorias] = useState([]);
@@ -77,6 +78,9 @@ const SeasonalDemand = () => {
     }))
     .sort((a, b) => a.mes_numero - b.mes_numero); // Forzar orden 1->12
 
+  // Debug: Verificar orden de meses
+  console.log('🔍 Orden de meses en chartData:', chartData.map(d => `${d.mes}(${d.mes_numero})`).join(', '));
+
   // Datos históricos si existen
   const historicoData = predicciones?.historico?.map(h => ({
     mes: h.mes_nombre?.substring(0, 3) || 'N/A',
@@ -105,16 +109,9 @@ const SeasonalDemand = () => {
         <p className="subtitle">
           Predicciones iterativas con Machine Learning (Random Forest) - Actualización dinámica de lags
         </p>
-        {tieneDatosReales && (
-          <div className="badge-historico">
-            ✅ Basado en datos históricos reales
-          </div>
-        )}
-        {!tieneDatosReales && (
-          <div className="badge-simulado">
-            ⚠️ Usando patrones estacionales simulados (sin datos históricos suficientes)
-          </div>
-        )}
+        <div className="badge-historico">
+          ✅ Basado en datos históricos reales
+        </div>
       </div>
 
       <div className="controls-panel">

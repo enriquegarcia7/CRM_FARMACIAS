@@ -537,6 +537,7 @@ class DetalleVenta(models.Model):
     producto = models.ForeignKey(Producto, on_delete=models.PROTECT)
     cantidad = models.IntegerField()
     precio_unitario = models.DecimalField(max_digits=10, decimal_places=2)
+    neto = models.DecimalField(max_digits=12, decimal_places=0, null=True, blank=True, help_text='Precio sin IVA (precio_unitario / 1.19)')
     subtotal = models.DecimalField(max_digits=12, decimal_places=2)
 
     class Meta:
@@ -544,6 +545,10 @@ class DetalleVenta(models.Model):
 
     def save(self, *args, **kwargs):
         self.subtotal = self.cantidad * self.precio_unitario
+        # Calcular neto si no viene del Excel (precio_unitario / 1.19, redondeado)
+        if self.neto is None and self.precio_unitario:
+            from decimal import Decimal, ROUND_HALF_UP
+            self.neto = (self.precio_unitario / Decimal('1.19')).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
         super().save(*args, **kwargs)
 
     def __str__(self):

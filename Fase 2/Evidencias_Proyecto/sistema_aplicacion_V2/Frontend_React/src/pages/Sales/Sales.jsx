@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Upload, X, ChevronLeft, ChevronRight, Receipt, FileText } from 'lucide-react';
+import { Search, Upload, X, ChevronLeft, ChevronRight, Receipt, FileText, ChevronUp, ChevronDown } from 'lucide-react';
 import axios from 'axios';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -10,6 +10,7 @@ const Sales = () => {
   const [searchInput, setSearchInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -27,11 +28,11 @@ const Sales = () => {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Cargar ventas cuando cambian filtros o página
+  // Cargar ventas cuando cambian filtros, página u ordenamiento
   useEffect(() => {
     cargarVentas();
     cargarUltimaCarga();
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, sortConfig]);
 
   const cargarUltimaCarga = async () => {
     try {
@@ -57,12 +58,25 @@ const Sales = () => {
       setLoading(true);
       setError(null);
 
+      // Mapeo de campos del frontend a campos del backend
+      const fieldMapping = {
+        'numero': 'numero',
+        'fecha': 'fecha',
+        'clienteRut': 'cliente__rut',
+        'clienteNombre': 'cliente__nombre',
+        'total': 'total'
+      };
+
       const params = {
         page: currentPage,
         page_size: itemsPerPage
       };
 
       if (searchTerm) params.search = searchTerm;
+
+      // Agregar ordenamiento
+      const backendField = fieldMapping[sortConfig.key] || sortConfig.key;
+      params.ordering = sortConfig.direction === 'desc' ? `-${backendField}` : backendField;
 
       const response = await axios.get(`${API_BASE_URL}/ventas/`, { params });
 
@@ -185,6 +199,7 @@ const Sales = () => {
   };
 
   // Aplanar ventas con detalles para mostrar en tabla
+  // El ordenamiento ya viene del backend, no es necesario ordenar aquí
   const ventasAplanadas = ventas.flatMap(venta =>
     venta.detalles.map(detalle => ({
       ventaId: venta.id,
@@ -196,10 +211,27 @@ const Sales = () => {
       producto: detalle.producto_descripcion,
       cantidad: detalle.cantidad,
       precioUnitario: detalle.precio_unitario,
-      neto: detalle.subtotal,
+      neto: detalle.neto || detalle.subtotal,
       total: detalle.subtotal // En este caso neto = total por línea
     }))
   );
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    setCurrentPage(1); // Volver a primera página al cambiar ordenamiento
+  };
+
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUp size={14} className="text-gray-300" />;
+    }
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} className="text-blue-600" />
+      : <ChevronDown size={14} className="text-blue-600" />;
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
@@ -272,16 +304,36 @@ const Sales = () => {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">N° Doc</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RUT Cliente</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nombre Cliente</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Producto</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Cantidad</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Precio Unit.</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Neto</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                  <th onClick={() => handleSort('numero')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center gap-1">N° Doc <SortIcon columnKey="numero" /></div>
+                  </th>
+                  <th onClick={() => handleSort('fecha')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center gap-1">Fecha <SortIcon columnKey="fecha" /></div>
+                  </th>
+                  <th onClick={() => handleSort('clienteRut')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center gap-1">RUT Cliente <SortIcon columnKey="clienteRut" /></div>
+                  </th>
+                  <th onClick={() => handleSort('clienteNombre')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center gap-1">Nombre Cliente <SortIcon columnKey="clienteNombre" /></div>
+                  </th>
+                  <th onClick={() => handleSort('codigo')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center gap-1">Código <SortIcon columnKey="codigo" /></div>
+                  </th>
+                  <th onClick={() => handleSort('producto')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center gap-1">Producto <SortIcon columnKey="producto" /></div>
+                  </th>
+                  <th onClick={() => handleSort('cantidad')} className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center justify-center gap-1">Cantidad <SortIcon columnKey="cantidad" /></div>
+                  </th>
+                  <th onClick={() => handleSort('precioUnitario')} className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center justify-end gap-1">Precio Unit. <SortIcon columnKey="precioUnitario" /></div>
+                  </th>
+                  <th onClick={() => handleSort('neto')} className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center justify-end gap-1">Neto <SortIcon columnKey="neto" /></div>
+                  </th>
+                  <th onClick={() => handleSort('total')} className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                    <div className="flex items-center justify-end gap-1">Total <SortIcon columnKey="total" /></div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">

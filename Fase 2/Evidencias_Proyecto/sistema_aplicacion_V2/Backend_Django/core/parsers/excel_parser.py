@@ -61,6 +61,7 @@ class ExcelOfferParser:
 
         # PARA ofertas_laboratorio.precio_oferta (precio con descuento)
         'precio_oferta': [
+            'oferta',  # ✅ Mediven usa "Oferta" para el precio con descuento
             'precio oferta', 'precio promocion', 'precio promoción',
             'precio promo', 'promo',
             'precio especial', 'precio descuento',
@@ -644,15 +645,21 @@ class ExcelOfferParser:
                 precio_normal = self._parse_price(row.get(column_map.get('precio_normal', '')))
                 precio_oferta = self._parse_price(row.get(column_map.get('precio_oferta', '')))
 
-                # Si hay % de descuento pero no precio de oferta, calcularlo
-                if precio_oferta == 0 and column_map.get('descuento'):
-                    desc_pct = self._parse_percentage(row.get(column_map['descuento']))
-                    if desc_pct > 0 and precio_normal > 0:
-                        precio_oferta = precio_normal * (1 - desc_pct / 100)
+                # Leer % de descuento de la columna si existe
+                desc_pct_columna = 0
+                if column_map.get('descuento'):
+                    desc_pct_columna = self._parse_percentage(row.get(column_map['descuento']))
 
-                # Calcular descuento %
-                if precio_normal > 0 and precio_oferta > 0:
+                # Si hay % de descuento en columna pero no precio de oferta, calcularlo
+                if precio_oferta == 0 and desc_pct_columna > 0 and precio_normal > 0:
+                    precio_oferta = precio_normal * (1 - desc_pct_columna / 100)
+                    descuento = desc_pct_columna
+                # Si hay precio de oferta y precio normal, calcular descuento %
+                elif precio_normal > 0 and precio_oferta > 0 and precio_oferta < precio_normal:
                     descuento = ((precio_normal - precio_oferta) / precio_normal) * 100
+                # Si hay % en columna y también precio de oferta, usar el de la columna
+                elif desc_pct_columna > 0:
+                    descuento = desc_pct_columna
                 else:
                     descuento = 0
 

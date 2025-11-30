@@ -33,11 +33,11 @@ class SeasonalPredictionService:
         models_dir = settings.ML_MODELS_PATH
         
         try:
-            print(f"📂 Cargando modelos desde: {models_dir}")
-            
+            print(f"[INFO] Cargando modelos desde: {models_dir}")
+
             # Cargar modelo de predicción estacional
             model_path = os.path.join(models_dir, 'modelo_prediccion_estacional.pkl')
-            print(f"🔍 Cargando: {model_path}")
+            print(f"[INFO] Cargando: {model_path}")
             
             if not os.path.exists(model_path):
                 raise FileNotFoundError(f"Modelo no encontrado: {model_path}")
@@ -51,11 +51,11 @@ class SeasonalPredictionService:
                     f"Obtenido: {type(self.model).__name__}"
                 )
             
-            print(f"✅ Modelo cargado: {type(self.model).__name__}")
-            
+            print(f"[OK] Modelo cargado: {type(self.model).__name__}")
+
             # Cargar label encoder
             le_path = os.path.join(models_dir, 'label_encoder_categorias.pkl')
-            print(f"🔍 Cargando: {le_path}")
+            print(f"[INFO] Cargando: {le_path}")
             
             if not os.path.exists(le_path):
                 raise FileNotFoundError(f"Label encoder no encontrado: {le_path}")
@@ -69,11 +69,11 @@ class SeasonalPredictionService:
                     f"Obtenido: {type(self.label_encoder).__name__}"
                 )
             
-            print(f"✅ Label encoder cargado: {len(self.label_encoder.classes_)} categorías")
-            print(f"✅ Modelos de predicción estacional cargados correctamente")
-            
+            print(f"[OK] Label encoder cargado: {len(self.label_encoder.classes_)} categorias")
+            print(f"[OK] Modelos de prediccion estacional cargados correctamente")
+
         except Exception as e:
-            print(f"❌ ERROR al cargar modelos de predicción estacional: {str(e)}")
+            print(f"[ERROR] ERROR al cargar modelos de prediccion estacional: {str(e)}")
             print(f"   Tipo de error: {type(e).__name__}")
             import traceback
             traceback.print_exc()

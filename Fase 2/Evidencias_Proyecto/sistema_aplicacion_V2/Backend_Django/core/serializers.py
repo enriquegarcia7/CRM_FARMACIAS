@@ -49,12 +49,21 @@ class ClienteSerializer(serializers.ModelSerializer):
         return value
 
     def get_total_compras(self, obj):
+        # Usar valor anotado si está disponible (más eficiente)
+        if hasattr(obj, 'total_compras') and obj.total_compras is not None:
+            return obj.total_compras
         return obj.ventas.filter(estado='completada').count()
 
     def get_monto_total(self, obj):
+        # Usar valor anotado si está disponible (más eficiente)
+        if hasattr(obj, 'monto_total') and obj.monto_total is not None:
+            return float(obj.monto_total)
         return sum(venta.total for venta in obj.ventas.filter(estado='completada'))
 
     def get_ultima_compra(self, obj):
+        # Usar valor anotado si está disponible (más eficiente)
+        if hasattr(obj, 'ultima_compra') and obj.ultima_compra is not None:
+            return obj.ultima_compra.date() if hasattr(obj.ultima_compra, 'date') else obj.ultima_compra
         ultima = obj.ventas.filter(estado='completada').order_by('-fecha').first()
         return ultima.fecha.date() if ultima else None
 

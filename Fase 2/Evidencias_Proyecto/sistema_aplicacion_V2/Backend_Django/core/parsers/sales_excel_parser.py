@@ -194,10 +194,11 @@ class SalesExcelParser:
 
         ESTRATEGIA OPTIMIZADA:
         1. Pre-cargar todos los productos y clientes en memoria (1 consulta cada uno)
-        2. Crear clientes faltantes en lote (bulk_create)
-        3. Agrupar ventas por FECHA + CLIENTE RUT + NUMERO
-        4. Crear ventas en lotes
-        5. Crear detalles en lotes
+        2. Pre-cargar detalles existentes para detectar duplicados (numero_doc + codigo_producto)
+        3. Crear clientes faltantes en lote (bulk_create)
+        4. Agrupar ventas por FECHA + CLIENTE RUT + NUMERO
+        5. Crear ventas en lotes
+        6. Crear detalles en lotes (solo los no duplicados)
         """
         logger.info(f"🚀 Iniciando procesamiento optimizado de {len(df)} filas")
 
@@ -211,9 +212,22 @@ class SalesExcelParser:
         clientes_dict = {c.rut: c for c in Cliente.objects.all()}
         logger.info(f"✅ {len(clientes_dict)} clientes cargados en memoria")
 
-        # 3. PROCESAR FILAS Y AGRUPAR VENTAS
+        # 3. PRE-CARGAR DETALLES EXISTENTES PARA DETECTAR DUPLICADOS
+        # Clave: (numero_documento, codigo_producto) -> existe
+        logger.info("🔍 Cargando detalles existentes para detectar duplicados...")
+        detalles_existentes = set()
+        for detalle in DetalleVenta.objects.select_related('venta', 'producto').only(
+            'venta__numero', 'producto__codigo'
+        ):
+            if detalle.venta.numero and detalle.producto.codigo:
+                clave = (str(detalle.venta.numero).strip(), str(detalle.producto.codigo).strip())
+                detalles_existentes.add(clave)
+        logger.info(f"✅ {len(detalles_existentes)} combinaciones documento-producto existentes")
+
+        # 4. PROCESAR FILAS Y AGRUPAR VENTAS
         ventas_dict = {}  # key: (fecha, cliente_rut, numero_doc) -> lista de items
         clientes_a_crear = {}  # RUT -> datos del cliente
+        detalles_duplicados_omitidos = 0  # Contador de detalles duplicados
 
         logger.info("📝 Procesando filas del Excel...")
         for index, row in df.iterrows():
@@ -282,6 +296,16 @@ class SalesExcelParser:
                 # Número de documento (para agrupar)
                 numero_doc = self._clean_string(row.get('NUMERO', ''))
 
+                # VERIFICAR DUPLICADO: si ya existe este documento + producto, omitir
+                clave_duplicado = (numero_doc, codigo_producto)
+                if numero_doc and clave_duplicado in detalles_existentes:
+                    detalles_duplicados_omitidos += 1
+                    continue  # Omitir esta fila, ya existe en la BD
+
+                # Agregar a set para evitar duplicados dentro del mismo archivo
+                if numero_doc:
+                    detalles_existentes.add(clave_duplicado)
+
                 # Agrupar por fecha, cliente RUT y número de documento
                 key = (fecha.date(), cliente_rut, numero_doc)
                 if key not in ventas_dict:
@@ -320,8 +344,11 @@ class SalesExcelParser:
                 continue
 
         logger.info(f"✅ {len(df)} filas procesadas, {len(ventas_dict)} ventas agrupadas")
+        if detalles_duplicados_omitidos > 0:
+            logger.info(f"⏭️ {detalles_duplicados_omitidos} filas omitidas (duplicados documento+producto)")
+        self.stats['detalles_duplicados_omitidos'] = detalles_duplicados_omitidos
 
-        # 4. CREAR CLIENTES FALTANTES EN LOTE (1 bulk_create)
+        # 5. CREAR CLIENTES FALTANTES EN LOTE (1 bulk_create)
         if clientes_a_crear:
             logger.info(f"👥 Creando {len(clientes_a_crear)} clientes nuevos...")
             nuevos_clientes = []
@@ -407,11 +434,21 @@ class SalesExcelParser:
                     if venta_bd:  # Solo crear detalles si la venta fue insertada
                         for item in items:
                             subtotal = item['cantidad'] * item['precio_unitario']
+                            # Usar neto del Excel si existe, sino calcular desde precio_unitario
+                            neto_valor = item.get('neto')
+                            if neto_valor and neto_valor > 0:
+                                # Redondear el neto del Excel (sin decimales)
+                                neto_redondeado = round(neto_valor)
+                            else:
+                                # Calcular neto = precio_unitario / 1.19 (redondeado)
+                                neto_redondeado = round(float(item['precio_unitario']) / 1.19)
+
                             detalles_a_crear.append(DetalleVenta(
                                 venta=venta_bd,
                                 producto=item['producto'],
                                 cantidad=item['cantidad'],
                                 precio_unitario=item['precio_unitario'],
+                                neto=Decimal(str(neto_redondeado)),
                                 subtotal=subtotal
                             ))
 

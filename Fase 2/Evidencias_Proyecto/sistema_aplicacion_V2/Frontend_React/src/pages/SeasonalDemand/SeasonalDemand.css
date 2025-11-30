@@ -256,17 +256,6 @@
   margin-top: 10px;
 }
 
-.badge-simulado {
-  display: inline-block;
-  background: #f39c12;
-  color: white;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-top: 10px;
-}
-
 .badge-tendencia {
   display: inline-block;
   padding: 4px 12px;
