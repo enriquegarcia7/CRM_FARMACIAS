@@ -273,9 +273,14 @@ class OfertaLaboratorioDetalladaSerializer(serializers.ModelSerializer):
         return obj.fecha_fin
 
     def get_dias_vigencia(self, obj):
-        """Días de vigencia restantes"""
-        if obj.fecha_fin and obj.fecha_inicio:
-            return (obj.fecha_fin - obj.fecha_inicio).days
+        """
+        Días de vigencia desde hoy.
+        - Positivo: días restantes de vigencia
+        - Negativo: días desde que venció
+        """
+        from datetime import date
+        if obj.fecha_fin:
+            return (obj.fecha_fin - date.today()).days
         return 0
 
 

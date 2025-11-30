@@ -562,17 +562,46 @@ class ExcelOfferParser:
             raise
 
     def _detect_columns(self):
-        """Detecta columnas del Excel y las mapea a campos de la BD"""
+        """
+        Detecta columnas del Excel y las mapea a campos de la BD.
+
+        Usa coincidencia en 3 pasos para evitar falsos positivos:
+        1. Coincidencia EXACTA (preferida)
+        2. Coincidencia al INICIO del nombre de columna
+        3. Coincidencia como SUBSTRING (solo si no hay mejor match)
+        """
         column_map = {}
 
         # Log de columnas disponibles
         logger.info(f"📋 Columnas disponibles en Excel: {list(self.df.columns)}")
 
         for key, variations in self.COLUMN_MAPPINGS.items():
+            # Paso 1: Buscar coincidencia EXACTA
             for col in self.df.columns:
-                if any(var in col for var in variations):
+                if col in variations:
                     column_map[key] = col
-                    logger.info(f"  ✓ Detectado '{key}' -> '{col}'")
+                    logger.info(f"  ✓ Detectado '{key}' -> '{col}' (exacto)")
+                    break
+
+            if key in column_map:
+                continue
+
+            # Paso 2: Buscar coincidencia al INICIO del nombre
+            for col in self.df.columns:
+                if any(col.startswith(var) for var in variations if len(var) >= 3):
+                    column_map[key] = col
+                    logger.info(f"  ✓ Detectado '{key}' -> '{col}' (startswith)")
+                    break
+
+            if key in column_map:
+                continue
+
+            # Paso 3: Buscar coincidencia como SUBSTRING (solo para variaciones largas)
+            for col in self.df.columns:
+                # Solo usar substring para variaciones de 5+ caracteres (evitar 'id', 'cod', etc.)
+                if any(var in col for var in variations if len(var) >= 5):
+                    column_map[key] = col
+                    logger.info(f"  ✓ Detectado '{key}' -> '{col}' (substring)")
                     break
 
         # Log de columnas NO detectadas
@@ -607,8 +636,20 @@ class ExcelOfferParser:
                     continue
 
                 # Código de producto (BARCODE, SKU, etc.)
-                codigo = str(row.get(column_map.get('codigo', ''), '')).strip()
-                if codigo and codigo.lower() in ['nan', 'none', '']:
+                # Priorizar columna 'barcode' directamente para Mediven
+                codigo_raw = row.get(column_map.get('codigo', ''), '')
+
+                # Manejar valores numéricos (barcodes son números largos)
+                if pd.notna(codigo_raw):
+                    if isinstance(codigo_raw, (int, float)):
+                        # Convertir número a string sin notación científica
+                        codigo = str(int(codigo_raw)) if codigo_raw == int(codigo_raw) else str(codigo_raw)
+                    else:
+                        codigo = str(codigo_raw).strip()
+
+                    if codigo.lower() in ['nan', 'none', '']:
+                        codigo = None
+                else:
                     codigo = None
 
                 # ⚠️ VALIDACIÓN: Skip filas que parecen ser headers de categoría

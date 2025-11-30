@@ -346,7 +346,7 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
 
         laboratorio = request.query_params.get('laboratorio', None)
         proveedor = request.query_params.get('proveedor', None)
-        solo_activas = request.query_params.get('activas', 'true').lower() == 'true'
+        solo_activas = request.query_params.get('activas', 'false').lower() == 'true'
         search = request.query_params.get('search', None)
 
         logger.info(f"📋 Filtros recibidos: laboratorio={laboratorio}, proveedor={proveedor}, activas={solo_activas}, search={search}")
@@ -423,20 +423,13 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def laboratorios(self, request):
         """
-        Lista todos los laboratorios disponibles con ofertas VIGENTES y conteo.
+        Lista todos los laboratorios disponibles con ofertas y conteo.
         Devuelve el NOMBRE del laboratorio (no el ID) para mostrar en el filtro.
-
-        IMPORTANTE: Solo muestra laboratorios con ofertas que están:
-        - activa=True
-        - fecha_fin >= today (vigentes)
+        Incluye todas las ofertas (vigentes y vencidas).
         """
-        today = timezone.now().date()
         laboratorios = (
             OfertaLaboratorio.objects
-            .filter(
-                activa=True,
-                fecha_fin__gte=today  # Solo ofertas vigentes
-            )
+            .filter(laboratorio__isnull=False)
             .values('laboratorio__nombre')
             .annotate(
                 total_ofertas=Count('id'),
@@ -463,21 +456,13 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def proveedores(self, request):
         """
-        Lista todos los proveedores disponibles con ofertas VIGENTES y conteo.
+        Lista todos los proveedores disponibles con ofertas y conteo.
         Devuelve el NOMBRE del proveedor para mostrar en el filtro.
-
-        IMPORTANTE: Solo muestra proveedores con ofertas que están:
-        - activa=True
-        - fecha_fin >= today (vigentes)
+        Incluye todas las ofertas (vigentes y vencidas).
         """
-        today = timezone.now().date()
         proveedores = (
             OfertaLaboratorio.objects
-            .filter(
-                activa=True,
-                fecha_fin__gte=today,  # Solo ofertas vigentes
-                producto_catalogo__proveedor__isnull=False
-            )
+            .filter(producto_catalogo__proveedor__isnull=False)
             .values('producto_catalogo__proveedor__nombre')
             .annotate(
                 total_ofertas=Count('id'),

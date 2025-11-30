@@ -66,8 +66,7 @@ const OfertasLaboratorio = () => {
 
       const params = {
         page: currentPage,
-        page_size: itemsPerPage,
-        activas: true
+        page_size: itemsPerPage
       };
 
       if (selectedLab) params.laboratorio = selectedLab;
@@ -132,9 +131,17 @@ const OfertasLaboratorio = () => {
   };
 
   const getDiasVigenciaColor = (dias) => {
+    if (dias < 0) return 'text-gray-700 bg-gray-200'; // Vencido
     if (dias <= 3) return 'text-red-700 bg-red-100';
     if (dias <= 7) return 'text-yellow-700 bg-yellow-100';
     return 'text-green-700 bg-green-100';
+  };
+
+  const formatDiasVigencia = (dias) => {
+    if (dias < 0) return `Vencido hace ${Math.abs(dias)} días`;
+    if (dias === 0) return 'Vence hoy';
+    if (dias === 1) return '1 día restante';
+    return `${dias} días restantes`;
   };
 
   const handleSort = (key) => {
@@ -195,7 +202,7 @@ const OfertasLaboratorio = () => {
         <div className="flex items-center bg-blue-100 text-blue-700 px-4 py-2 rounded-lg">
           <Package size={20} className="mr-2" />
           <span className="font-semibold">
-            {totalItems.toLocaleString('es-CL')} ofertas vigentes
+            {totalItems.toLocaleString('es-CL')} ofertas
           </span>
         </div>
       </div>
@@ -342,7 +349,7 @@ const OfertasLaboratorio = () => {
                         {formatFecha(oferta.vencimiento_vigencia)}
                       </span>
                       <span className={`mt-1 px-2 py-0.5 rounded-full text-xs font-semibold ${getDiasVigenciaColor(oferta.dias_vigencia)}`}>
-                        {oferta.dias_vigencia} días
+                        {formatDiasVigencia(oferta.dias_vigencia)}
                       </span>
                     </div>
                   </td>

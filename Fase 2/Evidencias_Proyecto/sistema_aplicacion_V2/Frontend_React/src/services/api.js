@@ -139,9 +139,10 @@ export const ofertasService = {
     if (params.proveedor) queryParams.append('proveedor', params.proveedor);
     if (params.search) queryParams.append('search', params.search);
 
-    // Default activas = true
-    const activas = params.activas !== undefined ? params.activas : true;
-    queryParams.append('activas', activas);
+    // Solo agregar activas si se especifica explícitamente
+    if (params.activas !== undefined) {
+      queryParams.append('activas', params.activas);
+    }
 
     return api.get(`/ofertas/por_laboratorio/?${queryParams.toString()}`);
   },
