@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Search, Mail, Star, User, TrendingUp } from 'lucide-react';
+import { Search, Mail, Star, User, TrendingUp, ChevronUp, ChevronDown } from 'lucide-react';
 import { clientesService } from '../../services/api';
 
 const Customers = () => {
   const [clientes, setClientes] = useState([]);
-  const [filteredClientes, setFilteredClientes] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [tipoCliente, setTipoCliente] = useState('todos'); // todos, frecuentes, normales
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'nombre', direction: 'asc' });
 
   // Estados de paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -27,11 +28,16 @@ const Customers = () => {
   useEffect(() => {
     cargarEstadisticas();
     cargarClientes();
-  }, [currentPage]);
+  }, [currentPage, searchTerm, tipoCliente, sortConfig]);
 
+  // Debounce para búsqueda (500ms)
   useEffect(() => {
-    filtrarClientes();
-  }, [searchTerm, tipoCliente, clientes]);
+    const timer = setTimeout(() => {
+      setSearchTerm(searchInput);
+      setCurrentPage(1);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   const cargarEstadisticas = async () => {
     try {
@@ -52,11 +58,29 @@ const Customers = () => {
       setLoading(true);
       setError(null);
 
-      // Consumir API paginada del backend
-      const response = await clientesService.getAll({
+      // Mapeo de campos frontend a backend
+      const fieldMapping = {
+        'nombre': 'nombre',
+        'correo': 'correo',
+        'totalCompras': 'total_compras',
+        'montoTotal': 'monto_total',
+        'ultimaCompra': 'ultima_compra'
+      };
+
+      const params = {
         page: currentPage,
         page_size: pageSize
-      });
+      };
+
+      if (searchTerm) params.search = searchTerm;
+      if (tipoCliente && tipoCliente !== 'todos') params.tipo = tipoCliente;
+
+      // Agregar ordenamiento
+      const backendField = fieldMapping[sortConfig.key] || sortConfig.key;
+      params.ordering = sortConfig.direction === 'desc' ? `-${backendField}` : backendField;
+
+      // Consumir API paginada del backend
+      const response = await clientesService.getAll(params);
 
       // Django REST Framework retorna: { count, next, previous, results }
       const paginatedData = response.data;
@@ -102,29 +126,21 @@ const Customers = () => {
     }
   };
 
-  const filtrarClientes = () => {
-    let resultado = clientes;
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    setCurrentPage(1);
+  };
 
-    // Filtrar por término de búsqueda
-    if (searchTerm) {
-      resultado = resultado.filter(
-        (c) =>
-          c.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          c.correo.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUp size={14} className="text-gray-300" />;
     }
-
-    // Filtrar por tipo de cliente
-    if (tipoCliente === 'frecuentes') {
-      resultado = resultado.filter((c) => c.frecuencia === 'frecuente');
-    } else if (tipoCliente === 'normales') {
-      resultado = resultado.filter((c) => c.frecuencia === 'normal');
-    }
-
-    // Ordenar por total de compras descendente
-    resultado.sort((a, b) => b.totalCompras - a.totalCompras);
-
-    setFilteredClientes(resultado);
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} className="text-blue-600" />
+      : <ChevronDown size={14} className="text-blue-600" />;
   };
 
   const formatCurrency = (value) => {
@@ -245,10 +261,10 @@ const Customers = () => {
             <Search className="absolute left-3 top-3 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar por nombre o correo..."
+              placeholder="Buscar por nombre, RUT o correo..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -275,20 +291,20 @@ const Customers = () => {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Tipo
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Nombre
+                <th onClick={() => handleSort('nombre')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Nombre <SortIcon columnKey="nombre" /></div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Correo
+                <th onClick={() => handleSort('correo')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Correo <SortIcon columnKey="correo" /></div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total Compras
+                <th onClick={() => handleSort('totalCompras')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Total Compras <SortIcon columnKey="totalCompras" /></div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Monto Total
+                <th onClick={() => handleSort('montoTotal')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Monto Total <SortIcon columnKey="montoTotal" /></div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Última Compra
+                <th onClick={() => handleSort('ultimaCompra')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Última Compra <SortIcon columnKey="ultimaCompra" /></div>
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Acciones
@@ -296,7 +312,7 @@ const Customers = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredClientes.map((cliente) => (
+              {clientes.map((cliente) => (
                 <tr key={cliente.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
                     {cliente.frecuencia === 'frecuente' ? (
@@ -339,7 +355,7 @@ const Customers = () => {
             </tbody>
           </table>
         </div>
-        {filteredClientes.length === 0 && (
+        {clientes.length === 0 && !loading && (
           <div className="text-center py-12 text-gray-500">
             No se encontraron clientes
           </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, AlertTriangle, Package, Filter, Upload, X, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { Search, AlertTriangle, Package, Filter, Upload, X, ChevronLeft, ChevronRight, Clock, ChevronUp, ChevronDown } from 'lucide-react';
 import { productosService } from '../../services/api';
 
 const Inventory = () => {
@@ -10,6 +10,7 @@ const Inventory = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [ultimaCarga, setUltimaCarga] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'codigo', direction: 'asc' });
 
   // Paginación backend
   const [currentPage, setCurrentPage] = useState(1);
@@ -26,11 +27,11 @@ const Inventory = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef(null);
 
-  // Cargar productos cuando cambian filtros o página
+  // Cargar productos cuando cambian filtros, página u ordenamiento
   useEffect(() => {
     cargarProductos();
     cargarUltimaCarga();
-  }, [currentPage, filtroStock, searchTerm]);
+  }, [currentPage, filtroStock, searchTerm, sortConfig]);
 
   // Debounce para búsqueda (500ms)
   useEffect(() => {
@@ -54,6 +55,9 @@ const Inventory = () => {
 
       if (filtroStock) params.filtro_stock = filtroStock;
       if (searchTerm) params.search = searchTerm;
+
+      // Agregar ordenamiento
+      params.ordering = sortConfig.direction === 'desc' ? `-${sortConfig.key}` : sortConfig.key;
 
       const response = await productosService.getAll(params);
 
@@ -196,6 +200,23 @@ const Inventory = () => {
   const indexOfFirstItem = (currentPage - 1) * itemsPerPage + 1;
   const indexOfLastItem = Math.min(currentPage * itemsPerPage, totalItems);
 
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    setCurrentPage(1);
+  };
+
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUp size={14} className="text-gray-300" />;
+    }
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} className="text-blue-600" />
+      : <ChevronDown size={14} className="text-blue-600" />;
+  };
+
   if (loading && productos.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -304,17 +325,17 @@ const Inventory = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
-                  Código
+                <th onClick={() => handleSort('codigo')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Código <SortIcon columnKey="codigo" /></div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Producto
+                <th onClick={() => handleSort('descripcion')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Producto <SortIcon columnKey="descripcion" /></div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock
+                <th onClick={() => handleSort('stock_actual')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Stock <SortIcon columnKey="stock_actual" /></div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock Mín. ML
+                <th onClick={() => handleSort('stock_minimo')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Stock Mín. ML <SortIcon columnKey="stock_minimo" /></div>
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
                   Demanda Diaria

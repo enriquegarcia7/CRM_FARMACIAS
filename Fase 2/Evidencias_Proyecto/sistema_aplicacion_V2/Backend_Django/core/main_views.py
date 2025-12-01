@@ -1,9 +1,9 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
-from django.db.models import Count, Sum, Q, F
-from django.db.models.functions import TruncMonth, TruncDate
+from django.db.models import Count, Sum, Q, F, Max
+from django.db.models.functions import TruncMonth, TruncDate, Coalesce
 from django.utils import timezone
 from datetime import timedelta
 from .models import (
@@ -29,6 +29,48 @@ class ClienteViewSet(viewsets.ModelViewSet):
     queryset = Cliente.objects.all()
     serializer_class = ClienteSerializer
     pagination_class = OfertasPagination  # 50 clientes por página
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['nombre', 'rut', 'correo', 'telefono']
+    ordering_fields = ['nombre', 'rut', 'correo', 'total_compras', 'monto_total', 'ultima_compra']
+    ordering = ['nombre']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # Anotar campos calculados para permitir ordenamiento
+        from django.db.models import Value
+        from django.db.models.functions import Coalesce
+        from decimal import Decimal
+
+        queryset = queryset.annotate(
+            total_compras=Count('ventas', filter=Q(ventas__estado='completada')),
+            monto_total=Coalesce(Sum('ventas__total', filter=Q(ventas__estado='completada')), Value(Decimal('0'))),
+            ultima_compra=Max('ventas__fecha', filter=Q(ventas__estado='completada'))
+        )
+
+        # Búsqueda personalizada con normalización de RUT
+        search = self.request.query_params.get('search', '')
+        if search:
+            search_normalized = search.replace('.', '').replace('-', '').strip()
+            queryset = queryset.filter(
+                Q(nombre__icontains=search) |
+                Q(rut__icontains=search_normalized) |
+                Q(correo__icontains=search)
+            )
+
+        # Filtro por tipo de cliente
+        tipo = self.request.query_params.get('tipo', '')
+        if tipo == 'frecuentes':
+            queryset = queryset.filter(total_compras__gte=5)
+        elif tipo == 'normales':
+            queryset = queryset.filter(total_compras__lt=5)
+
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get('search'):
+            self.filter_backends = [filters.OrderingFilter]
+        return super().list(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'])
     def frecuentes(self, request):
@@ -82,6 +124,9 @@ class ProductoViewSet(viewsets.ModelViewSet):
     queryset = Producto.objects.select_related('proveedor_principal', 'categoria').all()
     serializer_class = ProductoSerializer
     pagination_class = OfertasPagination  # 50 productos por página
+    filter_backends = [filters.OrderingFilter]
+    ordering_fields = ['codigo', 'nombre', 'descripcion', 'stock_actual', 'stock_minimo', 'precio_venta']
+    ordering = ['codigo']
 
     def get_queryset(self):
         """Query optimizado con filtros"""
@@ -107,7 +152,7 @@ class ProductoViewSet(viewsets.ModelViewSet):
         elif filtro_stock == 'normal':
             queryset = queryset.filter(stock_actual__gte=F('stock_minimo'))
 
-        return queryset.order_by('codigo')
+        return queryset
 
     @action(detail=False, methods=['get'])
     def low_stock(self, request):
@@ -290,14 +335,21 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
         Obtiene ofertas agrupadas por laboratorio con paginación backend.
         Query params:
             - laboratorio: Filtrar por nombre de laboratorio (opcional)
+            - proveedor: Filtrar por nombre de proveedor (opcional)
             - activas: Filtrar solo activas (default: true)
             - page: Número de página (default: 1)
             - page_size: Items por página (default: 50, max: 100)
             - search: Búsqueda en código, descripción, laboratorio
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
         laboratorio = request.query_params.get('laboratorio', None)
-        solo_activas = request.query_params.get('activas', 'true').lower() == 'true'
+        proveedor = request.query_params.get('proveedor', None)
+        solo_activas = request.query_params.get('activas', 'false').lower() == 'true'
         search = request.query_params.get('search', None)
+
+        logger.info(f"📋 Filtros recibidos: laboratorio={laboratorio}, proveedor={proveedor}, activas={solo_activas}, search={search}")
 
         # Query optimizado con select_related para reducir queries
         ofertas = OfertaLaboratorio.objects.select_related(
@@ -313,14 +365,28 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
             'laboratorio__id', 'laboratorio__nombre'
         )
 
+        total_inicial = ofertas.count()
+        logger.info(f"📊 Total ofertas (sin filtros): {total_inicial}")
+
         # Filtros
         if solo_activas:
             # Filtrar solo ofertas vigentes
             today = timezone.now().date()
             ofertas = ofertas.filter(activa=True, fecha_fin__gte=today)
+            logger.info(f"📊 Después de filtro activas (fecha_fin >= {today}): {ofertas.count()}")
 
         if laboratorio:
             ofertas = ofertas.filter(laboratorio__nombre__icontains=laboratorio)
+            logger.info(f"📊 Después de filtro laboratorio '{laboratorio}': {ofertas.count()}")
+
+        if proveedor:
+            # Debug: mostrar proveedores disponibles antes del filtro
+            proveedores_disponibles = ofertas.values_list('producto_catalogo__proveedor__nombre', flat=True).distinct()
+            logger.info(f"🔍 Proveedores disponibles: {list(proveedores_disponibles)}")
+            logger.info(f"🔍 Buscando proveedor: '{proveedor}'")
+
+            ofertas = ofertas.filter(producto_catalogo__proveedor__nombre__icontains=proveedor)
+            logger.info(f"📊 Después de filtro proveedor '{proveedor}': {ofertas.count()}")
 
         if search:
             ofertas = ofertas.filter(
@@ -330,8 +396,14 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
                 Q(producto_catalogo__proveedor__nombre__icontains=search)
             )
 
-        # Ordenar por laboratorio y producto
-        ofertas = ofertas.order_by('laboratorio__nombre', 'producto_catalogo__nombre')
+        # Ordenamiento dinámico (si se especifica)
+        ordering = request.query_params.get('ordering', None)
+        if ordering:
+            # Soportar ordenamiento descendente con prefijo '-'
+            ofertas = ofertas.order_by(ordering)
+        else:
+            # Ordenar por defecto por laboratorio y producto
+            ofertas = ofertas.order_by('laboratorio__nombre', 'producto_catalogo__nombre')
 
         # Aplicar paginación backend
         paginator = OfertasPagination()
@@ -351,13 +423,14 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def laboratorios(self, request):
         """
-        Lista todos los laboratorios disponibles con ofertas activas y conteo.
+        Lista todos los laboratorios disponibles con ofertas y conteo.
         Devuelve el NOMBRE del laboratorio (no el ID) para mostrar en el filtro.
+        Incluye todas las ofertas (vigentes y vencidas).
         """
         laboratorios = (
             OfertaLaboratorio.objects
-            .filter(activa=True)
-            .values('laboratorio__nombre')  # ✅ Cambiado de 'laboratorio' a 'laboratorio__nombre'
+            .filter(laboratorio__isnull=False)
+            .values('laboratorio__nombre')
             .annotate(
                 total_ofertas=Count('id'),
                 promedio_descuento=Sum('descuento') / Count('id')
@@ -378,6 +451,39 @@ class OfertaLaboratorioViewSet(viewsets.ModelViewSet):
         return Response({
             'total_laboratorios': len(laboratorios_list),
             'laboratorios': laboratorios_list
+        })
+
+    @action(detail=False, methods=['get'])
+    def proveedores(self, request):
+        """
+        Lista todos los proveedores disponibles con ofertas y conteo.
+        Devuelve el NOMBRE del proveedor para mostrar en el filtro.
+        Incluye todas las ofertas (vigentes y vencidas).
+        """
+        proveedores = (
+            OfertaLaboratorio.objects
+            .filter(producto_catalogo__proveedor__isnull=False)
+            .values('producto_catalogo__proveedor__nombre')
+            .annotate(
+                total_ofertas=Count('id'),
+                promedio_descuento=Sum('descuento') / Count('id')
+            )
+            .order_by('-total_ofertas')
+        )
+
+        # Mapear a formato consistente
+        proveedores_list = [
+            {
+                'proveedor': prov['producto_catalogo__proveedor__nombre'],
+                'total_ofertas': prov['total_ofertas'],
+                'promedio_descuento': prov['promedio_descuento']
+            }
+            for prov in proveedores
+        ]
+
+        return Response({
+            'total_proveedores': len(proveedores_list),
+            'proveedores': proveedores_list
         })
 
     @action(detail=False, methods=['post'])
@@ -403,6 +509,37 @@ class VentaViewSet(viewsets.ModelViewSet):
     queryset = Venta.objects.select_related('cliente').prefetch_related('detalles__producto').all()
     serializer_class = VentaSerializer
     pagination_class = OfertasPagination  # 50 ventas por página
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['numero', 'cliente__rut', 'cliente__nombre', 'detalles__producto__codigo', 'detalles__producto__descripcion']
+    ordering_fields = ['id', 'numero', 'fecha', 'total', 'cliente__rut', 'cliente__nombre']
+    ordering = ['-fecha']  # Ordenamiento por defecto
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+
+        # Obtener término de búsqueda y normalizarlo (quitar puntos y guiones para RUT)
+        search = self.request.query_params.get('search', '')
+        if search:
+            # Normalizar RUT: quitar puntos y guiones
+            search_normalized = search.replace('.', '').replace('-', '').strip()
+
+            # Buscar con ambos formatos (original y normalizado)
+            queryset = queryset.filter(
+                Q(numero__icontains=search) |
+                Q(cliente__rut__icontains=search_normalized) |
+                Q(cliente__nombre__icontains=search) |
+                Q(detalles__producto__codigo__icontains=search) |
+                Q(detalles__producto__descripcion__icontains=search)
+            ).distinct()
+
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        # Si hay búsqueda personalizada, no usar el SearchFilter predeterminado
+        if request.query_params.get('search'):
+            # Remover temporalmente SearchFilter para usar nuestra lógica
+            self.filter_backends = [filters.OrderingFilter]
+        return super().list(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='ultima-carga')
     def ultima_carga(self, request):
@@ -451,6 +588,7 @@ class VentaViewSet(viewsets.ModelViewSet):
                 'ventas_insertadas': result.get('ventas_insertadas', 0),
                 'ventas_duplicadas': result.get('ventas_duplicadas', 0),
                 'detalles_insertados': result.get('detalles_insertados', 0),
+                'detalles_duplicados_omitidos': result.get('detalles_duplicados_omitidos', 0),
                 'clientes_creados': result.get('clientes_creados', 0),
                 'productos_no_encontrados': result.get('productos_no_encontrados', 0),
                 'errores': result.get('errores', [])[:20]  # Mostrar solo primeros 20 errores

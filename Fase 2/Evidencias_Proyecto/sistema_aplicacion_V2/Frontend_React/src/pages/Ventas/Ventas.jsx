@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Search, DollarSign, TrendingUp, Package, Calendar, Filter } from 'lucide-react';
+import { Search, DollarSign, TrendingUp, Package, Calendar, Filter, ChevronUp, ChevronDown } from 'lucide-react';
 import { ventasService } from '../../services/api';
 
+// Ventas component with sortable columns - v2
 const Ventas = () => {
   const [ventas, setVentas] = useState([]);
   const [filteredVentas, setFilteredVentas] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
   const [stats, setStats] = useState({
     totalVentas: 0,
     totalMonto: 0,
@@ -21,7 +23,7 @@ const Ventas = () => {
 
   useEffect(() => {
     filtrarVentas();
-  }, [searchTerm, ventas]);
+  }, [searchTerm, ventas, sortConfig]);
 
   const cargarVentas = async () => {
     try {
@@ -31,18 +33,23 @@ const Ventas = () => {
       const response = await ventasService.getAll();
 
       // Mapear datos del backend al formato esperado por el frontend
-      const ventasFormateadas = response.data.map(venta => ({
-        id: venta.id,
-        fecha: venta.fecha,
-        cliente: venta.cliente_nombre || 'Cliente Anónimo',
-        clienteId: venta.cliente,
-        producto: venta.producto_nombre || 'N/A',
-        productoId: venta.producto,
-        cantidad: venta.cantidad || 0,
-        precio_unitario: venta.precio_unitario || 0,
-        total: venta.total || 0,
-        metodo_pago: venta.metodo_pago || 'Efectivo'
-      }));
+      // Cada venta tiene detalles con productos, extraemos info del primer detalle
+      const ventasFormateadas = response.data.map(venta => {
+        const primerDetalle = venta.detalles?.[0];
+        return {
+          id: venta.id,
+          fecha: venta.fecha,
+          cliente: venta.cliente_nombre || 'Cliente Anónimo',
+          clienteId: venta.cliente,
+          producto: primerDetalle?.producto_descripcion || 'N/A',
+          productoId: primerDetalle?.producto,
+          cantidad: primerDetalle?.cantidad || 0,
+          precio_unitario: primerDetalle?.precio_unitario || 0,
+          neto: primerDetalle?.neto || 0,
+          total: venta.total || 0,
+          metodo_pago: venta.metodo_pago || 'Efectivo'
+        };
+      });
 
       setVentas(ventasFormateadas);
       calcularEstadisticas(ventasFormateadas);
@@ -81,10 +88,45 @@ const Ventas = () => {
       );
     }
 
-    // Ordenar por fecha descendente
-    resultado.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+    // Ordenar según configuración
+    resultado = [...resultado].sort((a, b) => {
+      let aValue = a[sortConfig.key];
+      let bValue = b[sortConfig.key];
+
+      // Manejar fechas
+      if (sortConfig.key === 'fecha') {
+        aValue = new Date(aValue);
+        bValue = new Date(bValue);
+      }
+
+      // Manejar strings
+      if (typeof aValue === 'string') {
+        aValue = aValue.toLowerCase();
+        bValue = bValue.toLowerCase();
+      }
+
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
 
     setFilteredVentas(resultado);
+  };
+
+  const handleSort = (key) => {
+    setSortConfig(prev => {
+      const newDirection = prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc';
+      return { key, direction: newDirection };
+    });
+  };
+
+  const renderSortIcon = (columnKey) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUp size={14} className="text-gray-300" />;
+    }
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} className="text-blue-600" />
+      : <ChevronDown size={14} className="text-blue-600" />;
   };
 
   const formatCurrency = (value) => {
@@ -217,26 +259,69 @@ const Ventas = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  ID
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('id')}
+                >
+                  <div className="flex items-center gap-1">
+                    ID {renderSortIcon('id')}
+                  </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Fecha
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('fecha')}
+                >
+                  <div className="flex items-center gap-1">
+                    Fecha {renderSortIcon('fecha')}
+                  </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Cliente
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('cliente')}
+                >
+                  <div className="flex items-center gap-1">
+                    Cliente {renderSortIcon('cliente')}
+                  </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Producto
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('producto')}
+                >
+                  <div className="flex items-center gap-1">
+                    Producto {renderSortIcon('producto')}
+                  </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Cantidad
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('cantidad')}
+                >
+                  <div className="flex items-center gap-1">
+                    Cantidad {renderSortIcon('cantidad')}
+                  </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Precio Unit.
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('precio_unitario')}
+                >
+                  <div className="flex items-center gap-1">
+                    Precio Unit. {renderSortIcon('precio_unitario')}
+                  </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('neto')}
+                >
+                  <div className="flex items-center gap-1">
+                    Neto {renderSortIcon('neto')}
+                  </div>
+                </th>
+                <th
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                  onClick={() => handleSort('total')}
+                >
+                  <div className="flex items-center gap-1">
+                    Total {renderSortIcon('total')}
+                  </div>
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Método Pago
@@ -263,6 +348,9 @@ const Ventas = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {formatCurrency(venta.precio_unitario)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                    {formatCurrency(venta.neto)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-green-600">
                     {formatCurrency(venta.total)}

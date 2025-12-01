@@ -116,6 +116,8 @@ services:
     build:
       context: ./Frontend_React
       dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
     container_name: smartpharm_frontend
     ports:
       - "${FRONTEND_PORT:-80}:80"
@@ -123,10 +125,6 @@ services:
       - backend
     networks:
       - smartpharm_network
-    env_file:
-      - .env
-    environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
 
 volumes:
   postgres_data:

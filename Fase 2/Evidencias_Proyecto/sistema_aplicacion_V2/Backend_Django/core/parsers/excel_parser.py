@@ -61,6 +61,7 @@ class ExcelOfferParser:
 
         # PARA ofertas_laboratorio.precio_oferta (precio con descuento)
         'precio_oferta': [
+            'oferta',  # ✅ Mediven usa "Oferta" para el precio con descuento
             'precio oferta', 'precio promocion', 'precio promoción',
             'precio promo', 'promo',
             'precio especial', 'precio descuento',
@@ -561,17 +562,46 @@ class ExcelOfferParser:
             raise
 
     def _detect_columns(self):
-        """Detecta columnas del Excel y las mapea a campos de la BD"""
+        """
+        Detecta columnas del Excel y las mapea a campos de la BD.
+
+        Usa coincidencia en 3 pasos para evitar falsos positivos:
+        1. Coincidencia EXACTA (preferida)
+        2. Coincidencia al INICIO del nombre de columna
+        3. Coincidencia como SUBSTRING (solo si no hay mejor match)
+        """
         column_map = {}
 
         # Log de columnas disponibles
         logger.info(f"📋 Columnas disponibles en Excel: {list(self.df.columns)}")
 
         for key, variations in self.COLUMN_MAPPINGS.items():
+            # Paso 1: Buscar coincidencia EXACTA
             for col in self.df.columns:
-                if any(var in col for var in variations):
+                if col in variations:
                     column_map[key] = col
-                    logger.info(f"  ✓ Detectado '{key}' -> '{col}'")
+                    logger.info(f"  ✓ Detectado '{key}' -> '{col}' (exacto)")
+                    break
+
+            if key in column_map:
+                continue
+
+            # Paso 2: Buscar coincidencia al INICIO del nombre
+            for col in self.df.columns:
+                if any(col.startswith(var) for var in variations if len(var) >= 3):
+                    column_map[key] = col
+                    logger.info(f"  ✓ Detectado '{key}' -> '{col}' (startswith)")
+                    break
+
+            if key in column_map:
+                continue
+
+            # Paso 3: Buscar coincidencia como SUBSTRING (solo para variaciones largas)
+            for col in self.df.columns:
+                # Solo usar substring para variaciones de 5+ caracteres (evitar 'id', 'cod', etc.)
+                if any(var in col for var in variations if len(var) >= 5):
+                    column_map[key] = col
+                    logger.info(f"  ✓ Detectado '{key}' -> '{col}' (substring)")
                     break
 
         # Log de columnas NO detectadas
@@ -606,8 +636,20 @@ class ExcelOfferParser:
                     continue
 
                 # Código de producto (BARCODE, SKU, etc.)
-                codigo = str(row.get(column_map.get('codigo', ''), '')).strip()
-                if codigo and codigo.lower() in ['nan', 'none', '']:
+                # Priorizar columna 'barcode' directamente para Mediven
+                codigo_raw = row.get(column_map.get('codigo', ''), '')
+
+                # Manejar valores numéricos (barcodes son números largos)
+                if pd.notna(codigo_raw):
+                    if isinstance(codigo_raw, (int, float)):
+                        # Convertir número a string sin notación científica
+                        codigo = str(int(codigo_raw)) if codigo_raw == int(codigo_raw) else str(codigo_raw)
+                    else:
+                        codigo = str(codigo_raw).strip()
+
+                    if codigo.lower() in ['nan', 'none', '']:
+                        codigo = None
+                else:
                     codigo = None
 
                 # ⚠️ VALIDACIÓN: Skip filas que parecen ser headers de categoría
@@ -644,15 +686,21 @@ class ExcelOfferParser:
                 precio_normal = self._parse_price(row.get(column_map.get('precio_normal', '')))
                 precio_oferta = self._parse_price(row.get(column_map.get('precio_oferta', '')))
 
-                # Si hay % de descuento pero no precio de oferta, calcularlo
-                if precio_oferta == 0 and column_map.get('descuento'):
-                    desc_pct = self._parse_percentage(row.get(column_map['descuento']))
-                    if desc_pct > 0 and precio_normal > 0:
-                        precio_oferta = precio_normal * (1 - desc_pct / 100)
+                # Leer % de descuento de la columna si existe
+                desc_pct_columna = 0
+                if column_map.get('descuento'):
+                    desc_pct_columna = self._parse_percentage(row.get(column_map['descuento']))
 
-                # Calcular descuento %
-                if precio_normal > 0 and precio_oferta > 0:
+                # Si hay % de descuento en columna pero no precio de oferta, calcularlo
+                if precio_oferta == 0 and desc_pct_columna > 0 and precio_normal > 0:
+                    precio_oferta = precio_normal * (1 - desc_pct_columna / 100)
+                    descuento = desc_pct_columna
+                # Si hay precio de oferta y precio normal, calcular descuento %
+                elif precio_normal > 0 and precio_oferta > 0 and precio_oferta < precio_normal:
                     descuento = ((precio_normal - precio_oferta) / precio_normal) * 100
+                # Si hay % en columna y también precio de oferta, usar el de la columna
+                elif desc_pct_columna > 0:
+                    descuento = desc_pct_columna
                 else:
                     descuento = 0
 

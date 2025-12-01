@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Search, Filter, Tag, TrendingDown, Calendar, Package, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Filter, Tag, TrendingDown, Calendar, Package, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from 'lucide-react';
 import { ofertasService } from '../../services/api';
 
 const OfertasLaboratorio = () => {
   const [ofertas, setOfertas] = useState([]);
   const [laboratorios, setLaboratorios] = useState([]);
+  const [proveedores, setProveedores] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchInput, setSearchInput] = useState(''); // Para debounce
   const [selectedLab, setSelectedLab] = useState('');
+  const [selectedProveedor, setSelectedProveedor] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'vencimiento_vigencia', direction: 'asc' });
 
   // Paginación backend
   const [currentPage, setCurrentPage] = useState(1);
@@ -17,15 +20,16 @@ const OfertasLaboratorio = () => {
   const [totalItems, setTotalItems] = useState(0);
   const itemsPerPage = 50;
 
-  // Cargar laboratorios solo una vez
+  // Cargar laboratorios y proveedores solo una vez
   useEffect(() => {
     cargarLaboratorios();
+    cargarProveedores();
   }, []);
 
-  // Cargar ofertas cuando cambian filtros o página
+  // Cargar ofertas cuando cambian filtros, página u ordenamiento
   useEffect(() => {
     cargarOfertas();
-  }, [currentPage, selectedLab, searchTerm]);
+  }, [currentPage, selectedLab, selectedProveedor, searchTerm, sortConfig]);
 
   // Debounce para búsqueda (esperar 500ms después de que el usuario termine de escribir)
   useEffect(() => {
@@ -46,6 +50,15 @@ const OfertasLaboratorio = () => {
     }
   };
 
+  const cargarProveedores = async () => {
+    try {
+      const response = await ofertasService.getProveedores();
+      setProveedores(response.data.proveedores || []);
+    } catch (error) {
+      console.error('Error cargando proveedores:', error);
+    }
+  };
+
   const cargarOfertas = async () => {
     try {
       setLoading(true);
@@ -53,12 +66,15 @@ const OfertasLaboratorio = () => {
 
       const params = {
         page: currentPage,
-        page_size: itemsPerPage,
-        activas: true
+        page_size: itemsPerPage
       };
 
       if (selectedLab) params.laboratorio = selectedLab;
+      if (selectedProveedor) params.proveedor = selectedProveedor;
       if (searchTerm) params.search = searchTerm;
+
+      // Agregar ordenamiento
+      params.ordering = sortConfig.direction === 'desc' ? `-${sortConfig.key}` : sortConfig.key;
 
       const response = await ofertasService.getPorLaboratorio(params);
 
@@ -115,9 +131,34 @@ const OfertasLaboratorio = () => {
   };
 
   const getDiasVigenciaColor = (dias) => {
+    if (dias < 0) return 'text-gray-700 bg-gray-200'; // Vencido
     if (dias <= 3) return 'text-red-700 bg-red-100';
     if (dias <= 7) return 'text-yellow-700 bg-yellow-100';
     return 'text-green-700 bg-green-100';
+  };
+
+  const formatDiasVigencia = (dias) => {
+    if (dias < 0) return `Vencido hace ${Math.abs(dias)} días`;
+    if (dias === 0) return 'Vence hoy';
+    if (dias === 1) return '1 día restante';
+    return `${dias} días restantes`;
+  };
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    setCurrentPage(1);
+  };
+
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUp size={14} className="text-gray-300" />;
+    }
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} className="text-blue-600" />
+      : <ChevronDown size={14} className="text-blue-600" />;
   };
 
   if (loading && ofertas.length === 0) {
@@ -161,7 +202,7 @@ const OfertasLaboratorio = () => {
         <div className="flex items-center bg-blue-100 text-blue-700 px-4 py-2 rounded-lg">
           <Package size={20} className="mr-2" />
           <span className="font-semibold">
-            {totalItems.toLocaleString('es-CL')} ofertas vigentes
+            {totalItems.toLocaleString('es-CL')} ofertas
           </span>
         </div>
       </div>
@@ -209,6 +250,21 @@ const OfertasLaboratorio = () => {
             <Filter size={20} className="text-gray-400" />
             <select
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={selectedProveedor}
+              onChange={(e) => {
+                setSelectedProveedor(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="">Todos los proveedores</option>
+              {proveedores.map((prov) => (
+                <option key={prov.proveedor} value={prov.proveedor}>
+                  {prov.proveedor} ({prov.total_ofertas})
+                </option>
+              ))}
+            </select>
+            <select
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={selectedLab}
               onChange={(e) => {
                 setSelectedLab(e.target.value);
@@ -238,26 +294,26 @@ const OfertasLaboratorio = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
-                  Proveedor
+                <th onClick={() => handleSort('producto_catalogo__proveedor__nombre')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Proveedor <SortIcon columnKey="producto_catalogo__proveedor__nombre" /></div>
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
-                  Código
+                <th onClick={() => handleSort('producto_catalogo__codigo')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Código <SortIcon columnKey="producto_catalogo__codigo" /></div>
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48">
-                  Descripción
+                <th onClick={() => handleSort('producto_catalogo__descripcion')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-48 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Descripción <SortIcon columnKey="producto_catalogo__descripcion" /></div>
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
-                  Laboratorio
+                <th onClick={() => handleSort('producto_catalogo__laboratorio')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Laboratorio <SortIcon columnKey="producto_catalogo__laboratorio" /></div>
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
-                  Precio
+                <th onClick={() => handleSort('precio')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Precio <SortIcon columnKey="precio" /></div>
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  % Desc.
+                <th onClick={() => handleSort('descuento_porcentaje')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">% Desc. <SortIcon columnKey="descuento_porcentaje" /></div>
                 </th>
-                <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
-                  Vigencia
+                <th onClick={() => handleSort('vencimiento_vigencia')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Vigencia <SortIcon columnKey="vencimiento_vigencia" /></div>
                 </th>
               </tr>
             </thead>
@@ -293,7 +349,7 @@ const OfertasLaboratorio = () => {
                         {formatFecha(oferta.vencimiento_vigencia)}
                       </span>
                       <span className={`mt-1 px-2 py-0.5 rounded-full text-xs font-semibold ${getDiasVigenciaColor(oferta.dias_vigencia)}`}>
-                        {oferta.dias_vigencia} días
+                        {formatDiasVigencia(oferta.dias_vigencia)}
                       </span>
                     </div>
                   </td>
