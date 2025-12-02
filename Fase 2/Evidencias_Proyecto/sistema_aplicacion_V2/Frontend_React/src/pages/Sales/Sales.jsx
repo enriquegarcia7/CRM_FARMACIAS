@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Upload, X, ChevronLeft, ChevronRight, Receipt, FileText } from 'lucide-react';
+import { Search, Upload, X, ChevronLeft, ChevronRight, Receipt, FileText, ChevronUp, ChevronDown } from 'lucide-react';
 import api from '../../services/api';
 
 const Sales = () => {
@@ -8,6 +8,7 @@ const Sales = () => {
   const [searchInput, setSearchInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
 
   // Paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -25,11 +26,11 @@ const Sales = () => {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Cargar ventas cuando cambian filtros o página
+  // Cargar ventas cuando cambian filtros, página u ordenamiento
   useEffect(() => {
     cargarVentas();
     cargarUltimaCarga();
-  }, [currentPage, searchTerm]);
+  }, [currentPage, searchTerm, sortConfig]);
 
   const cargarUltimaCarga = async () => {
     try {
@@ -55,12 +56,25 @@ const Sales = () => {
       setLoading(true);
       setError(null);
 
+      // Mapeo de campos del frontend a campos del backend
+      const fieldMapping = {
+        'numero': 'numero',
+        'fecha': 'fecha',
+        'clienteRut': 'cliente__rut',
+        'clienteNombre': 'cliente__nombre',
+        'total': 'total'
+      };
+
       const params = {
         page: currentPage,
         page_size: itemsPerPage
       };
 
       if (searchTerm) params.search = searchTerm;
+
+      // Agregar ordenamiento
+      const backendField = fieldMapping[sortConfig.key] || sortConfig.key;
+      params.ordering = sortConfig.direction === 'desc' ? `-${backendField}` : backendField;
 
       const response = await api.get('/ventas/', { params });
 
@@ -107,6 +121,7 @@ const Sales = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 300000, // 5 minutos
         onUploadProgress: (progressEvent) => {
           const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
           setUploadProgress(percentCompleted);
@@ -164,39 +179,85 @@ const Sales = () => {
     return `$${Number(precio).toLocaleString('es-CL')}`;
   };
 
+  const formatearRut = (rut) => {
+    if (!rut) return '';
+    // RUT está guardado sin puntos ni guión: "100415755"
+    // Formato de salida: "10.041.575-5"
+    const rutStr = rut.toString().replace(/\./g, '').replace(/-/g, '');
+
+    if (rutStr.length < 2) return rut;
+
+    const dv = rutStr.slice(-1);
+    const numero = rutStr.slice(0, -1);
+
+    // Agregar puntos cada 3 dígitos desde la derecha
+    const numeroFormateado = numero.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+    return `${numeroFormateado}-${dv}`;
+  };
+
   // Aplanar ventas con detalles para mostrar en tabla
+  // El ordenamiento ya viene del backend, no es necesario ordenar aquí
+  // Cálculos de precios para Chile (IVA 19%):
+  // - Precio Unitario: valor CON IVA (viene del Excel)
+  // - Neto: precio sin IVA = Precio Unitario / 1.19
+  // - Total: Precio Unitario × Cantidad
   const ventasAplanadas = ventas.flatMap(venta =>
-    venta.detalles.map(detalle => ({
-      ventaId: venta.id,
-      numero: venta.numero,
-      fecha: venta.fecha,
-      clienteRut: venta.cliente,
-      clienteNombre: venta.cliente_nombre,
-      codigo: detalle.producto_codigo || detalle.producto,
-      producto: detalle.producto_nombre || detalle.producto_descripcion || '',
-      cantidad: detalle.cantidad,
-      precioUnitario: detalle.precio_unitario,
-      neto: detalle.subtotal,
-      total: detalle.subtotal // En este caso neto = total por línea
-    }))
+    venta.detalles.map(detalle => {
+      const precioUnitario = Number(detalle.precio_unitario) || 0;
+      const cantidad = Number(detalle.cantidad) || 0;
+      const netoUnitario = Math.round(precioUnitario / 1.19); // Precio sin IVA (redondeado)
+      const total = precioUnitario * cantidad; // Total con IVA
+
+      return {
+        ventaId: venta.id,
+        numero: venta.numero,
+        fecha: venta.fecha,
+        clienteRut: venta.cliente_rut,
+        clienteNombre: venta.cliente_nombre,
+        codigo: detalle.producto_codigo || detalle.producto,
+        producto: detalle.producto_nombre || detalle.producto_descripcion || '',
+        cantidad: cantidad,
+        precioUnitario: precioUnitario,
+        neto: netoUnitario,
+        total: total
+      };
+    })
   );
 
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    setCurrentPage(1); // Volver a primera página al cambiar ordenamiento
+  };
+
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUp size={14} className="text-gray-300" />;
+    }
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} className="text-blue-600" />
+      : <ChevronDown size={14} className="text-blue-600" />;
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-2 sm:p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-white rounded-lg shadow-sm p-4 md:p-6 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 flex items-center gap-2">
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-800 flex items-center gap-2">
                 <Receipt className="text-blue-600" />
                 Historial de Ventas
               </h1>
-              <p className="text-gray-600 mt-1">Gestión de ventas históricas desde Excel</p>
+              <p className="text-gray-600 mt-1 text-sm md:text-base">Gestión de ventas históricas desde Excel</p>
             </div>
             <button
               onClick={() => setShowUploadModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
             >
               <Upload size={20} />
               Cargar Excel
@@ -209,23 +270,23 @@ const Sales = () => {
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
               <input
                 type="text"
-                placeholder="Buscar por RUT, nombre cliente, código producto..."
+                placeholder="Buscar por N° documento, cliente (nombre/RUT) o producto..."
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm md:text-base"
               />
             </div>
           </div>
 
           {/* Estadísticas */}
-          <div className="grid grid-cols-2 gap-4 mt-4">
-            <div className="bg-blue-50 rounded-lg p-4">
-              <p className="text-sm text-blue-600 font-medium">Total Ventas</p>
-              <p className="text-2xl font-bold text-blue-900">{totalItems}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+            <div className="bg-blue-50 rounded-lg p-3 md:p-4">
+              <p className="text-xs md:text-sm text-blue-600 font-medium">Total Ventas</p>
+              <p className="text-xl md:text-2xl font-bold text-blue-900">{totalItems}</p>
             </div>
-            <div className="bg-green-50 rounded-lg p-4">
-              <p className="text-sm text-green-600 font-medium">Última Carga</p>
-              <p className="text-lg font-bold text-green-900">
+            <div className="bg-green-50 rounded-lg p-3 md:p-4">
+              <p className="text-xs md:text-sm text-green-600 font-medium">Última Carga</p>
+              <p className="text-base md:text-lg font-bold text-green-900">
                 {ultimaCarga ? new Date(ultimaCarga).toLocaleString('es-CL', {
                   year: 'numeric',
                   month: '2-digit',
@@ -249,19 +310,39 @@ const Sales = () => {
         {/* Tabla de Ventas */}
         <div className="bg-white rounded-lg shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full divide-y divide-gray-200" style={{ minWidth: '1100px' }}>
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">N° Doc</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">RUT Cliente</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nombre Cliente</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Producto</th>
-                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Cantidad</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Precio Unit.</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Neto</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+                  <th onClick={() => handleSort('numero')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center gap-1">Doc <SortIcon columnKey="numero" /></div>
+                  </th>
+                  <th onClick={() => handleSort('fecha')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center gap-1">Fecha <SortIcon columnKey="fecha" /></div>
+                  </th>
+                  <th onClick={() => handleSort('clienteRut')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center gap-1">RUT <SortIcon columnKey="clienteRut" /></div>
+                  </th>
+                  <th onClick={() => handleSort('clienteNombre')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center gap-1">Cliente <SortIcon columnKey="clienteNombre" /></div>
+                  </th>
+                  <th onClick={() => handleSort('codigo')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center gap-1">Cod <SortIcon columnKey="codigo" /></div>
+                  </th>
+                  <th onClick={() => handleSort('producto')} className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center gap-1">Producto <SortIcon columnKey="producto" /></div>
+                  </th>
+                  <th onClick={() => handleSort('cantidad')} className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center justify-center gap-1">Cant <SortIcon columnKey="cantidad" /></div>
+                  </th>
+                  <th onClick={() => handleSort('precioUnitario')} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1">P.Unit <SortIcon columnKey="precioUnitario" /></div>
+                  </th>
+                  <th onClick={() => handleSort('neto')} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1">Neto <SortIcon columnKey="neto" /></div>
+                  </th>
+                  <th onClick={() => handleSort('total')} className="px-3 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1">Total <SortIcon columnKey="total" /></div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
@@ -285,16 +366,16 @@ const Sales = () => {
                 ) : (
                   ventasAplanadas.map((item, index) => (
                     <tr key={`${item.ventaId}-${index}`} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 text-sm text-gray-900">{item.numero || 'S/N'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{formatearFecha(item.fecha)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900 font-mono">{item.clienteRut}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{item.clienteNombre}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 font-mono">{item.codigo}</td>
-                      <td className="px-4 py-3 text-sm text-gray-900">{item.producto}</td>
-                      <td className="px-4 py-3 text-sm text-center text-gray-900">{formatearNumero(item.cantidad)}</td>
-                      <td className="px-4 py-3 text-sm text-right text-gray-900">{formatearPrecio(item.precioUnitario)}</td>
-                      <td className="px-4 py-3 text-sm text-right text-gray-900">{formatearPrecio(item.neto)}</td>
-                      <td className="px-4 py-3 text-sm text-right font-semibold text-blue-900">{formatearPrecio(item.total)}</td>
+                      <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap">{item.numero || 'S/N'}</td>
+                      <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">{formatearFecha(item.fecha)}</td>
+                      <td className="px-3 py-3 text-sm text-gray-900 font-mono whitespace-nowrap">{formatearRut(item.clienteRut)}</td>
+                      <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap max-w-[200px] truncate" title={item.clienteNombre}>{item.clienteNombre}</td>
+                      <td className="px-3 py-3 text-sm text-gray-600 font-mono whitespace-nowrap">{item.codigo}</td>
+                      <td className="px-3 py-3 text-sm text-gray-900 whitespace-nowrap max-w-[250px] truncate" title={item.producto}>{item.producto}</td>
+                      <td className="px-3 py-3 text-sm text-center text-gray-900 whitespace-nowrap">{formatearNumero(item.cantidad)}</td>
+                      <td className="px-3 py-3 text-sm text-right text-gray-900 whitespace-nowrap">{formatearPrecio(item.precioUnitario)}</td>
+                      <td className="px-3 py-3 text-sm text-right text-gray-900 whitespace-nowrap">{formatearPrecio(item.neto)}</td>
+                      <td className="px-3 py-3 text-sm text-right font-semibold text-blue-900 whitespace-nowrap">{formatearPrecio(item.total)}</td>
                     </tr>
                   ))
                 )}

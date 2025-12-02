@@ -15,6 +15,7 @@ import { DollarSign, TrendingUp, Package, Users } from 'lucide-react';
 import { dashboardService, transaccionesService } from '../../services/api';
 
 const Dashboard = () => {
+  // v1.1 - Fixed quantity display format
   const [stats, setStats] = useState({
     totalVentas: 0,
     ventasMes: 0,
@@ -26,6 +27,7 @@ const Dashboard = () => {
   const [ventasMensuales, setVentasMensuales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [filtroOrden, setFiltroOrden] = useState('cantidad'); // 'cantidad' o 'ventas'
 
   useEffect(() => {
     cargarDatos();
@@ -54,8 +56,20 @@ const Dashboard = () => {
         clientesActivos: statsRes.data.clientes_activos || 0,
       });
 
-      setVentasMensuales(salesRes.data || []);
-      setTopProductos(topProdRes.data || []);
+      // Mapear ventas mensuales: "total" -> "ventas"
+      const ventasMapeadas = (salesRes.data || []).map(venta => ({
+        mes: venta.mes,
+        ventas: venta.total
+      }));
+      setVentasMensuales(ventasMapeadas);
+
+      // Mapear productos: "producto__nombre" -> "nombre"
+      const productosMapeados = (topProdRes.data || []).map(producto => ({
+        nombre: producto.producto__nombre || producto.producto__codigo,
+        cantidad: producto.cantidad,
+        ventas: producto.ventas
+      }));
+      setTopProductos(productosMapeados);
 
     } catch (error) {
       console.error('Error cargando datos del dashboard:', error);
@@ -70,6 +84,56 @@ const Dashboard = () => {
       style: 'currency',
       currency: 'CLP',
     }).format(value);
+  };
+
+  // Función para obtener productos ordenados según el filtro
+  const getProductosOrdenados = () => {
+    if (!topProductos || topProductos.length === 0) return [];
+
+    const productos = [...topProductos];
+
+    if (filtroOrden === 'cantidad') {
+      return productos.sort((a, b) => b.cantidad - a.cantidad);
+    } else {
+      return productos.sort((a, b) => b.ventas - a.ventas);
+    }
+  };
+
+  // Función para truncar nombres largos en el eje X
+  const truncarNombre = (nombre, maxLength = 20) => {
+    if (!nombre) return '';
+    if (nombre.length <= maxLength) return nombre;
+    return nombre.substring(0, maxLength - 3) + '...';
+  };
+
+  // Formateador manual para cantidades (SIN símbolo de moneda)
+  const formatNumber = (num) => {
+    // Formatear número con punto como separador de miles
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  };
+
+  // Tooltip personalizado para productos (SIN formato de moneda)
+  const ProductoTooltip = ({ active, payload, label }) => {
+    if (active && payload && payload.length) {
+      const cantidad = payload[0].value;
+      return (
+        <div style={{
+          backgroundColor: 'white',
+          padding: '12px',
+          border: '1px solid #ccc',
+          borderRadius: '4px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}>
+          <p style={{ margin: 0, fontWeight: 'bold', marginBottom: '4px' }}>
+            {label}
+          </p>
+          <p style={{ margin: 0, color: '#8b5cf6' }}>
+            Cantidad: {formatNumber(cantidad)} unidades
+          </p>
+        </div>
+      );
+    }
+    return null;
   };
 
   const StatCard = ({ icon: Icon, title, value, trend, color }) => (
@@ -186,17 +250,22 @@ const Dashboard = () => {
         {/* Top 10 productos más vendidos */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">Top 10 Productos Más Vendidos</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={topProductos.slice(0, 5)}>
+          <ResponsiveContainer width="100%" height={550}>
+            <BarChart data={topProductos.slice(0, 5)} margin={{ top: 20, right: 20, bottom: 150, left: 20 }}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="nombre" angle={-45} textAnchor="end" height={100} />
-              <YAxis />
-              <Tooltip
-                formatter={(value, name) => [
-                  name === 'cantidad' ? value : formatCurrency(value),
-                  name === 'cantidad' ? 'Unidades' : 'Ventas',
-                ]}
+              <XAxis
+                dataKey="nombre"
+                angle={-45}
+                textAnchor="end"
+                height={180}
+                interval={0}
+                tick={{ fontSize: 9 }}
               />
+              <YAxis
+                label={{ value: 'Unidades', angle: -90, position: 'insideLeft' }}
+                tickFormatter={(value) => formatNumber(value)}
+              />
+              <Tooltip content={<ProductoTooltip />} />
               <Legend />
               <Bar dataKey="cantidad" fill="#8b5cf6" name="Cantidad Vendida" />
             </BarChart>
@@ -207,7 +276,23 @@ const Dashboard = () => {
       {/* Tabla de top productos */}
       <div className="bg-white rounded-lg shadow">
         <div className="p-6">
-          <h2 className="text-xl font-semibold mb-4">Detalle Top 10 Productos</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">Detalle Top 10 Productos</h2>
+
+            {/* Filtro de ordenamiento */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-600">Ordenar por:</span>
+              <select
+                value={filtroOrden}
+                onChange={(e) => setFiltroOrden(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="cantidad">Unidades más vendidas</option>
+                <option value="ventas">Monto $ acumulado</option>
+              </select>
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -227,7 +312,7 @@ const Dashboard = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {topProductos.map((producto, index) => (
+                {getProductosOrdenados().map((producto, index) => (
                   <tr key={index} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {index + 1}
@@ -236,7 +321,7 @@ const Dashboard = () => {
                       {producto.nombre}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {producto.cantidad}
+                      {formatNumber(producto.cantidad)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                       {formatCurrency(producto.ventas)}

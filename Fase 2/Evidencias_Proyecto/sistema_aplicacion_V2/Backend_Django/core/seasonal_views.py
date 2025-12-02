@@ -161,17 +161,20 @@ def get_seasonal_predictions_year(request):
         historico_list = list(historico)
         tiene_datos_reales = len(historico_list) > 0
 
-        # Preparar histórico para respuesta
+        # Preparar histórico para respuesta (ordenado por mes 1-12)
         historico_data = []
         if tiene_datos_reales:
+            temp_historico = []
             for h in historico_list[:12]:  # Últimos 12 meses
-                historico_data.append({
+                temp_historico.append({
                     'mes': h['mes_venta'].month,
                     'año': h['mes_venta'].year,
                     'mes_nombre': ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
                                    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'][h['mes_venta'].month - 1],
                     'transacciones': h['transacciones']
                 })
+            # Ordenar por mes (1-12) para mantener consistencia Enero->Diciembre
+            historico_data = sorted(temp_historico, key=lambda x: x['mes'])
 
         # Inicializar features con datos históricos o valores realistas por defecto
         if tiene_datos_reales and len(historico_list) >= 4:
@@ -293,7 +296,7 @@ def get_seasonal_predictions_year(request):
                     'min': intervalo_inferior,
                     'max': intervalo_superior
                 },
-                'tendencia': 'ALTA' if pred > trans_ma_3 * 1.15 else 'BAJA' if pred < trans_ma_3 * 0.85 else 'NORMAL',
+                'tendencia': 'PENDIENTE',  # Se calculará después con el promedio anual real
                 # Debug info (solo para análisis)
                 'debug': {
                     'patron_base': int(patron_base),
@@ -309,6 +312,16 @@ def get_seasonal_predictions_year(request):
         # Calcular estadísticas
         total_anual = sum(p['prediccion'] for p in predicciones)
         promedio_mensual = total_anual / 12
+
+        # CORREGIDO: Asignar tendencias basadas en el promedio anual real
+        # Así los meses con más transacciones serán ALTA y los de menos serán BAJA
+        for p in predicciones:
+            if p['prediccion'] > promedio_mensual * 1.15:
+                p['tendencia'] = 'ALTA'
+            elif p['prediccion'] < promedio_mensual * 0.85:
+                p['tendencia'] = 'BAJA'
+            else:
+                p['tendencia'] = 'NORMAL'
         max_mes = max(predicciones, key=lambda x: x['prediccion'])
         min_mes = min(predicciones, key=lambda x: x['prediccion'])
         variabilidad = ((max_mes['prediccion'] - min_mes['prediccion']) / promedio_mensual) * 100

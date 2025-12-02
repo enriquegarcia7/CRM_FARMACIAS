@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, AlertTriangle, Package, Filter, Upload, X, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
+import { Search, AlertTriangle, Package, Filter, Upload, X, ChevronLeft, ChevronRight, Clock, ChevronUp, ChevronDown } from 'lucide-react';
 import { productosService } from '../../services/api';
 
 const Inventory = () => {
@@ -10,6 +10,7 @@ const Inventory = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [ultimaCarga, setUltimaCarga] = useState(null);
+  const [sortConfig, setSortConfig] = useState({ key: 'codigo', direction: 'asc' });
 
   // Paginación backend
   const [currentPage, setCurrentPage] = useState(1);
@@ -26,11 +27,11 @@ const Inventory = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef(null);
 
-  // Cargar productos cuando cambian filtros o página
+  // Cargar productos cuando cambian filtros, página u ordenamiento
   useEffect(() => {
     cargarProductos();
     cargarUltimaCarga();
-  }, [currentPage, filtroStock, searchTerm]);
+  }, [currentPage, filtroStock, searchTerm, sortConfig]);
 
   // Debounce para búsqueda (500ms)
   useEffect(() => {
@@ -54,6 +55,9 @@ const Inventory = () => {
 
       if (filtroStock) params.filtro_stock = filtroStock;
       if (searchTerm) params.search = searchTerm;
+
+      // Agregar ordenamiento
+      params.ordering = sortConfig.direction === 'desc' ? `-${sortConfig.key}` : sortConfig.key;
 
       const response = await productosService.getAll(params);
 
@@ -173,7 +177,7 @@ const Inventory = () => {
   };
 
   const getStockStatus = (producto) => {
-    // Usar comparación simple stock_actual vs stock_minimo (sin cálculos ML pesados)
+    // Usar stock_minimo de la BD para consistencia con el filtro del backend
     const stockMinimo = producto.stock_minimo || 5;
     const porcentaje = stockMinimo > 0 ? (producto.stock_actual / stockMinimo) * 100 : 100;
     if (porcentaje < 50) return { color: 'text-red-600 bg-red-100', label: 'Crítico' };
@@ -195,6 +199,23 @@ const Inventory = () => {
 
   const indexOfFirstItem = (currentPage - 1) * itemsPerPage + 1;
   const indexOfLastItem = Math.min(currentPage * itemsPerPage, totalItems);
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+    setCurrentPage(1);
+  };
+
+  const SortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) {
+      return <ChevronUp size={14} className="text-gray-300" />;
+    }
+    return sortConfig.direction === 'asc'
+      ? <ChevronUp size={14} className="text-blue-600" />
+      : <ChevronDown size={14} className="text-blue-600" />;
+  };
 
   if (loading && productos.length === 0) {
     return (
@@ -304,22 +325,22 @@ const Inventory = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
-                  Código
+                <th onClick={() => handleSort('codigo')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-28 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Código <SortIcon columnKey="codigo" /></div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Producto
+                <th onClick={() => handleSort('descripcion')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Producto <SortIcon columnKey="descripcion" /></div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock
+                <th onClick={() => handleSort('stock_actual')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Stock <SortIcon columnKey="stock_actual" /></div>
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
-                  Stock Mín.
+                <th onClick={() => handleSort('stock_minimo')} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer hover:bg-gray-100 select-none">
+                  <div className="flex items-center gap-1">Stock Mín. ML <SortIcon columnKey="stock_minimo" /></div>
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
-                  Precio Costo
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
+                  Demanda Diaria
                 </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-28">
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
                   Precio Venta
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">
@@ -341,11 +362,31 @@ const Inventory = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-sm font-semibold text-gray-900">
                       {producto.stock_actual}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                      {producto.stock_minimo}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-indigo-600">
+                          {producto.stock_minimo_calculado || producto.stock_minimo || 5}
+                        </span>
+                        {producto.stock_minimo_calculado && (
+                          <span className="text-xs text-indigo-400 font-medium">
+                            ML + Histórico
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-700">
-                      ${parseFloat(producto.precio_costo || 0).toLocaleString('es-CL')}
+                    <td className="px-4 py-3 whitespace-nowrap text-sm">
+                      {producto.metricas_stock ? (
+                        <div className="flex flex-col">
+                          <span className="font-medium">
+                            {producto.metricas_stock.demanda_promedio_diaria?.toFixed(1) || '0.0'} u/día
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {Math.round(producto.metricas_stock.dias_cobertura || 0)} días cobertura
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-gray-400">Sin datos</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-sm text-right font-medium text-gray-900">
                       ${parseFloat(producto.precio_venta || 0).toLocaleString('es-CL')}

@@ -126,6 +126,7 @@ const Customers = () => {
       const clientesFormateados = clientesData.map(cliente => ({
         id: cliente.id,
         nombre: cliente.nombre,
+        rut: cliente.rut || '',
         correo: cliente.correo,
         telefono: cliente.telefono || 'N/A',
         totalCompras: cliente.total_compras || 0,
@@ -152,10 +153,13 @@ const Customers = () => {
     // Filtrar por término de búsqueda (solo local para búsqueda rápida)
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
+      // Normalizar RUT: quitar puntos y guiones para búsqueda
+      const termNormalized = term.replace(/\./g, '').replace(/-/g, '');
       resultado = resultado.filter(
         (c) =>
           (c.nombre && c.nombre.toLowerCase().includes(term)) ||
-          (c.correo && c.correo.toLowerCase().includes(term))
+          (c.correo && c.correo.toLowerCase().includes(term)) ||
+          (c.rut && c.rut.toLowerCase().replace(/\./g, '').replace(/-/g, '').includes(termNormalized))
       );
     }
 
@@ -485,7 +489,7 @@ const Customers = () => {
             <Search className="absolute left-3 top-3 text-gray-400" size={20} />
             <input
               type="text"
-              placeholder="Buscar por nombre o correo..."
+              placeholder="Buscar por nombre, RUT o correo..."
               className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}

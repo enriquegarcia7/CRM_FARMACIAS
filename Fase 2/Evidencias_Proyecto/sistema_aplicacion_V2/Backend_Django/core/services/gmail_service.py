@@ -7,7 +7,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from django.conf import settings
 import logging
-from config.secrets import get_gmail_token_path
+from config.secrets import get_gmail_token_path, get_smtp_config, get_gmail_token_from_env
 
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/gmail.readonly']
@@ -479,6 +479,12 @@ class GmailService:
         """
         Envía un correo electrónico usando SMTP con contraseña de aplicación.
 
+        Las credenciales se leen desde variables de entorno:
+            - SMTP_EMAIL: Correo de Gmail
+            - SMTP_APP_PASSWORD: Contraseña de aplicación (16 caracteres)
+            - SMTP_SERVER: Servidor (default: smtp.gmail.com)
+            - SMTP_PORT: Puerto (default: 587)
+
         Args:
             to_email: Dirección de correo del destinatario
             subject: Asunto del correo
@@ -492,15 +498,12 @@ class GmailService:
             from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
 
-            # Configuración SMTP de Gmail
-            SMTP_SERVER = 'smtp.gmail.com'
-            SMTP_PORT = 587
-            SMTP_EMAIL = 'proyectosmartpharm2025@gmail.com'
-            SMTP_APP_PASSWORD = 'uuwt rxzu dxza oesq'
+            # Obtener configuración SMTP desde variables de entorno
+            smtp_config = get_smtp_config()
 
             # Crear mensaje MIME
             message = MIMEMultipart('alternative')
-            message['From'] = f'SmartPharm <{SMTP_EMAIL}>'
+            message['From'] = f'SmartPharm <{smtp_config["email"]}>'
             message['To'] = to_email
             message['Subject'] = subject
 
@@ -509,14 +512,18 @@ class GmailService:
             message.attach(html_part)
 
             # Enviar usando SMTP
-            with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            with smtplib.SMTP(smtp_config['server'], smtp_config['port']) as server:
                 server.starttls()
-                server.login(SMTP_EMAIL, SMTP_APP_PASSWORD)
+                server.login(smtp_config['email'], smtp_config['app_password'])
                 server.send_message(message)
 
             logger.info(f"✅ Correo enviado exitosamente a {to_email} via SMTP")
             return {'id': 'smtp_success', 'to': to_email}
 
+        except ValueError as e:
+            # Error de configuración (faltan variables de entorno)
+            logger.error(f"❌ Error de configuración SMTP: {e}")
+            raise
         except Exception as e:
             logger.error(f"❌ Error enviando correo a {to_email}: {e}", exc_info=True)
             return None

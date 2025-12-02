@@ -23,6 +23,10 @@ PyPDF2==3.0.1
 scikit-learn==1.6.1
 numpy==1.26.4
 joblib==1.4.0
+
+# Fuzzy matching para mapeo de productos
+fuzzywuzzy==0.18.0
+python-Levenshtein==0.21.1
 # Celery
 celery==5.3.4
 redis==5.0.1

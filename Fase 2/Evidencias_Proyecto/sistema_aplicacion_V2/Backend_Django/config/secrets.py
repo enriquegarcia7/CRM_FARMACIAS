@@ -1,5 +1,5 @@
 """
-SmartPharm - Configuración de Credenciales OAuth
+SmartPharm - Configuración de Credenciales OAuth y SMTP
 
 Este módulo almacena las credenciales OAuth de Google en formato Base64
 para evitar que GitHub bloquee el push por detectar secretos.
@@ -15,6 +15,10 @@ IMPORTANTE: Si necesitas actualizar las credenciales:
 2. Encodea en Base64: base64.b64encode(json.dumps(credenciales).encode()).decode()
 3. Reemplaza GMAIL_OAUTH_CREDENTIALS_B64
 4. Haz commit y push - todos los desarrolladores tendrán la nueva versión
+
+CONFIGURACIÓN SMTP:
+Las credenciales SMTP se leen de variables de entorno para mayor seguridad.
+En GCP, configura estas variables en Cloud Run o Secret Manager.
 """
 
 import base64
@@ -90,3 +94,79 @@ def get_gmail_token_path(settings_base_dir):
 def get_user_session_token_path(settings_base_dir):
     """Ruta al archivo user_session_token.json (generado después de login)"""
     return os.path.join(settings_base_dir, 'user_session_token.json')
+
+
+# =============================================================================
+# CONFIGURACIÓN SMTP (Variables de Entorno)
+# =============================================================================
+
+def get_smtp_config():
+    """
+    Obtiene la configuración SMTP desde variables de entorno.
+
+    Variables requeridas:
+        - SMTP_EMAIL: Correo de Gmail para enviar
+        - SMTP_APP_PASSWORD: Contraseña de aplicación de Gmail (16 caracteres)
+
+    Variables opcionales:
+        - SMTP_SERVER: Servidor SMTP (default: smtp.gmail.com)
+        - SMTP_PORT: Puerto SMTP (default: 587)
+
+    Returns:
+        dict: Configuración SMTP
+
+    Raises:
+        ValueError: Si faltan variables de entorno requeridas
+    """
+    email = os.environ.get('SMTP_EMAIL')
+    app_password = os.environ.get('SMTP_APP_PASSWORD')
+
+    if not email or not app_password:
+        raise ValueError(
+            "Faltan variables de entorno SMTP. "
+            "Configura SMTP_EMAIL y SMTP_APP_PASSWORD en el archivo .env o en GCP."
+        )
+
+    return {
+        'server': os.environ.get('SMTP_SERVER', 'smtp.gmail.com'),
+        'port': int(os.environ.get('SMTP_PORT', '587')),
+        'email': email,
+        'app_password': app_password,
+    }
+
+
+# Token de Gmail codificado en Base64 (para almacenar en variable de entorno)
+# Este token se genera después de la autenticación OAuth y puede almacenarse
+# como variable de entorno en GCP para no depender del filesystem
+GMAIL_TOKEN_B64 = os.environ.get('GMAIL_TOKEN_B64', '')
+
+
+def get_gmail_token_from_env():
+    """
+    Obtiene el token de Gmail desde variable de entorno (para GCP).
+
+    Returns:
+        dict: Token decodificado o None si no existe
+    """
+    if not GMAIL_TOKEN_B64:
+        return None
+
+    try:
+        decoded_bytes = base64.b64decode(GMAIL_TOKEN_B64)
+        return json.loads(decoded_bytes.decode('utf-8'))
+    except Exception:
+        return None
+
+
+def save_gmail_token_to_env_format(token_dict):
+    """
+    Convierte un token de Gmail a formato Base64 para almacenar en variable de entorno.
+
+    Args:
+        token_dict: Diccionario con el token de Gmail
+
+    Returns:
+        str: Token codificado en Base64
+    """
+    token_json = json.dumps(token_dict)
+    return base64.b64encode(token_json.encode('utf-8')).decode('utf-8')

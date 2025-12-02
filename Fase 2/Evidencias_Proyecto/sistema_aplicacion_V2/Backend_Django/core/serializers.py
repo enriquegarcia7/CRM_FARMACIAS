@@ -49,18 +49,23 @@ class ClienteSerializer(serializers.ModelSerializer):
         return value
 
     def get_total_compras(self, obj):
-        # Usar anotación del queryset si existe, sino calcular
+        # Usar valor anotado si está disponible (más eficiente)
         if hasattr(obj, 'total_ventas'):
             return obj.total_ventas
-        if hasattr(obj, 'total_compras'):
+        if hasattr(obj, 'total_compras') and obj.total_compras is not None:
             return obj.total_compras
         return obj.ventas.filter(estado__codigo='completada').count()
 
     def get_monto_total(self, obj):
-        ventas = obj.ventas.filter(estado__codigo='completada')
-        return sum(venta.total for venta in ventas)
+        # Usar valor anotado si está disponible (más eficiente)
+        if hasattr(obj, 'monto_total') and obj.monto_total is not None:
+            return float(obj.monto_total)
+        return sum(venta.total for venta in obj.ventas.filter(estado__codigo='completada'))
 
     def get_ultima_compra(self, obj):
+        # Usar valor anotado si está disponible (más eficiente)
+        if hasattr(obj, 'ultima_compra') and obj.ultima_compra is not None:
+            return obj.ultima_compra.date() if hasattr(obj.ultima_compra, 'date') else obj.ultima_compra
         ultima = obj.ventas.filter(estado__codigo='completada').order_by('-fecha').first()
         return ultima.fecha.date() if ultima else None
 
@@ -79,27 +84,43 @@ class TransaccionSerializer(serializers.ModelSerializer):
 
 class ProductoListSerializer(serializers.ModelSerializer):
     """
-    Serializer LIGERO para listar productos sin cálculos pesados de ML.
-    Usa el stock_minimo fijo de la BD para comparaciones rápidas.
+    Serializer para listar productos con métricas de stock.
+    Incluye demanda diaria y días de cobertura calculados desde ventas históricas.
     """
     bajo_stock_simple = serializers.SerializerMethodField()
     proveedor_nombre = serializers.CharField(source='proveedor_principal.nombre', read_only=True)
     categoria_nombre = serializers.CharField(source='categoria.nombre', read_only=True)
+    stock_minimo_calculado = serializers.SerializerMethodField()
+    metricas_stock = serializers.SerializerMethodField()
 
     class Meta:
         model = Producto
         fields = [
             'id', 'codigo', 'nombre', 'descripcion',
-            'stock_actual', 'stock_minimo',
+            'stock_actual', 'stock_minimo', 'stock_minimo_calculado',
             'precio_costo', 'precio_venta',
             'activo', 'bajo_stock_simple',
             'proveedor_nombre', 'categoria_nombre',
-            'fecha_registro'
+            'fecha_registro', 'metricas_stock'
         ]
 
     def get_bajo_stock_simple(self, obj):
         """Comparación simple sin ML - usa stock_minimo fijo"""
         return obj.stock_actual < obj.stock_minimo
+
+    def get_stock_minimo_calculado(self, obj):
+        """Stock mínimo dinámico calculado con ML"""
+        try:
+            return obj.stock_minimo_calculado
+        except Exception:
+            return obj.stock_minimo
+
+    def get_metricas_stock(self, obj):
+        """Métricas de demanda diaria y días de cobertura"""
+        try:
+            return obj.metricas_stock
+        except Exception:
+            return None
 
 
 class ProductoSerializer(serializers.ModelSerializer):
@@ -108,6 +129,8 @@ class ProductoSerializer(serializers.ModelSerializer):
     SOLO usar para detalle de un producto, NO para listas.
     """
     bajo_stock = serializers.ReadOnlyField()
+    stock_minimo_calculado = serializers.ReadOnlyField()  # Stock dinámico ML
+    metricas_stock = serializers.ReadOnlyField()
 
     class Meta:
         model = Producto
@@ -297,9 +320,14 @@ class OfertaLaboratorioDetalladaSerializer(serializers.ModelSerializer):
         return obj.fecha_fin
 
     def get_dias_vigencia(self, obj):
-        """Días de vigencia restantes"""
-        if obj.fecha_fin and obj.fecha_inicio:
-            return (obj.fecha_fin - obj.fecha_inicio).days
+        """
+        Días de vigencia desde hoy.
+        - Positivo: días restantes de vigencia
+        - Negativo: días desde que venció
+        """
+        from datetime import date
+        if obj.fecha_fin:
+            return (obj.fecha_fin - date.today()).days
         return 0
 
 
@@ -327,6 +355,8 @@ class DetalleVentaSerializer(serializers.ModelSerializer):
 
 class VentaSerializer(serializers.ModelSerializer):
     cliente_nombre = serializers.CharField(source='cliente.nombre', read_only=True)
+    cliente_rut = serializers.CharField(source='cliente.rut', read_only=True)
+    cliente_correo = serializers.EmailField(source='cliente.correo', read_only=True)
     detalles = DetalleVentaSerializer(many=True, read_only=True)
 
     class Meta:

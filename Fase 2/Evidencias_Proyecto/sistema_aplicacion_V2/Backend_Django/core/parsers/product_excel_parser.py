@@ -16,7 +16,7 @@ class ProductExcelParser:
     - CODIGO: Código del producto (interno de la farmacia)
     - PRODUCTO: Nombre del producto
     - PREC UNITARIO: Precio unitario (costo)
-    - PREC UNIDADES: Precio por unidades
+    - PREC UNIT IVA: Valor Venta (precio de venta al público con IVA)
     - STOCK: Stock actual
     - CÓDIGO DE BARRAS: (opcional)
     - NOMBRE UNIT IVA: Nombre completo con IVA (opcional)
@@ -54,6 +54,12 @@ class ProductExcelParser:
                 'PRECIO UNIDADES': 'PREC UNIDADES',
                 'PRECIO_UNIDADES': 'PREC UNIDADES',
                 'PREC_UNIDADES': 'PREC UNIDADES',
+                # Mapeo para precio de venta (Valor Venta)
+                'PREC UNIT IVA': 'VALOR VENTA',
+                'PREC_UNIT_IVA': 'VALOR VENTA',
+                'PRECIO UNIT IVA': 'VALOR VENTA',
+                'PRECIO_UNIT_IVA': 'VALOR VENTA',
+                'VALOR_VENTA': 'VALOR VENTA',
                 'CODIGO_BARRAS': 'CÓDIGO DE BARRAS',
                 'COD_BARRAS': 'CÓDIGO DE BARRAS',
                 'CODIGO DE BARRAS': 'CÓDIGO DE BARRAS',
@@ -187,7 +193,10 @@ class ProductExcelParser:
                 descripcion = str(row.get('NOMBRE_UNIT_IVA', nombre)).strip()[:500]
                 codigo_barras = str(row.get('CODIGO_BARRAS', '')).strip()[:50]
                 precio_costo = self._parse_precio(row.get('PREC UNITARIO', 0))
-                precio_venta = self._parse_precio(row.get('PREC UNIDADES', precio_costo))
+                # Precio de venta: priorizar VALOR VENTA (desde PREC UNIT IVA), luego PREC UNIDADES
+                precio_venta = self._parse_precio(row.get('VALOR VENTA', 0))
+                if precio_venta == 0:
+                    precio_venta = self._parse_precio(row.get('PREC UNIDADES', precio_costo))
                 stock_actual = self._parse_int(row.get('STOCK', 0))
 
                 if codigo in productos_existentes_dict:

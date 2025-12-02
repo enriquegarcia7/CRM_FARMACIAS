@@ -1,22 +1,29 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   AlertTriangle,
-  Sun,
-  Activity,
-  TrendingUp,
-  Download,
   RefreshCw,
   ShoppingCart,
   Package,
-  ChevronLeft,
-  ChevronRight,
-  Filter
+  Filter,
+  Tag,
+  Clock,
+  FileDown
 } from 'lucide-react';
 import { sugerenciasService } from '../../services/api';
+
+// ============================================================
+// CACHE GLOBAL - Persiste entre cambios de vista/navegación
+// ============================================================
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+const globalCache = {
+  data: null,
+  timestamp: null
+};
 
 // Skeleton para carga
 const SkeletonRow = () => (
   <tr className="animate-pulse">
+    <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-16"></div></td>
     <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-3/4"></div></td>
     <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-16"></div></td>
     <td className="px-6 py-4"><div className="h-4 bg-gray-200 rounded w-16"></div></td>
@@ -40,79 +47,125 @@ const SkeletonCard = () => (
 );
 
 const PurchaseSuggestions = () => {
-  const [sugerencias, setSugerencias] = useState([]);
-  const [conteos, setConteos] = useState({ bajo_stock: 0, estacional: 0, epidemiologico: 0, total: 0 });
-  const [pagination, setPagination] = useState({ page: 1, page_size: 50, total_items: 0, total_pages: 0 });
-  const [activeTab, setActiveTab] = useState('bajo_stock');
-  const [loading, setLoading] = useState(true);
-  const [loadingGenerar, setLoadingGenerar] = useState(false);
-  const [error, setError] = useState(null);
-  const [consolidado, setConsolidado] = useState(null);
+  // Inicializar estado desde cache global si existe y es válido
+  const getCachedData = () => {
+    if (globalCache.data && globalCache.timestamp) {
+      const cacheAge = Date.now() - globalCache.timestamp;
+      if (cacheAge < CACHE_DURATION) {
+        return globalCache.data;
+      }
+    }
+    return null;
+  };
 
-  const cargarSugerencias = useCallback(async (tipo = activeTab, page = 1) => {
+  const cachedData = getCachedData();
+  const [sugerencias, setSugerencias] = useState(cachedData?.sugerencias || []);
+  const [resumen, setResumen] = useState(cachedData?.resumen || { total_productos: 0, con_oferta: 0, sin_oferta: 0, criticos: 0, altos: 0 });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Cargar sugerencias usando el endpoint rápido (con cache global)
+  const cargarSugerencias = useCallback(async (forceRefresh = false) => {
+    // Si hay cache válido y no es refresh forzado, usar cache
+    if (!forceRefresh && globalCache.data && globalCache.timestamp) {
+      const cacheAge = Date.now() - globalCache.timestamp;
+      if (cacheAge < CACHE_DURATION) {
+        setSugerencias(globalCache.data.sugerencias || []);
+        setResumen(globalCache.data.resumen || { total_productos: 0, con_oferta: 0, sin_oferta: 0, criticos: 0, altos: 0 });
+        return;
+      }
+    }
+
     try {
       setLoading(true);
       setError(null);
 
-      const response = await sugerenciasService.getTodas({
-        tipo: tipo,
-        page: page,
-        page_size: 50
-      });
+      const response = await sugerenciasService.rapido({ limite: 100 });
 
-      setSugerencias(response.data.results || []);
-      setConteos(response.data.conteos || { bajo_stock: 0, estacional: 0, epidemiologico: 0, total: 0 });
-      setPagination(response.data.pagination || { page: 1, page_size: 50, total_items: 0, total_pages: 0 });
+      if (response.data.success) {
+        const newData = {
+          sugerencias: response.data.sugerencias || [],
+          resumen: response.data.resumen || { total_productos: 0, con_oferta: 0, sin_oferta: 0, criticos: 0, altos: 0 }
+        };
+
+        // Guardar en cache GLOBAL
+        globalCache.data = newData;
+        globalCache.timestamp = Date.now();
+
+        setSugerencias(newData.sugerencias);
+        setResumen(newData.resumen);
+      } else {
+        setError(response.data.error || 'Error al cargar sugerencias');
+      }
 
     } catch (err) {
       console.error('Error cargando sugerencias:', err);
-      setError(err.response?.data?.message || err.message || 'Error al cargar sugerencias');
+      setError(err.response?.data?.error || err.message || 'Error al cargar sugerencias');
     } finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, []);
 
+  // Cargar datos al montar - solo si no hay cache válido
   useEffect(() => {
-    cargarSugerencias(activeTab, 1);
-  }, [activeTab]);
+    if (!cachedData) {
+      cargarSugerencias();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const cargarConsolidado = async () => {
-    try {
-      const response = await sugerenciasService.consolidar();
-      if (response.data?.consolidado) {
-        setConsolidado(response.data.consolidado);
+  // Función para generar y descargar CSVs por proveedor
+  const generarCSVsPorProveedor = () => {
+    const proveedores = {
+      'MEDIVEN': [],
+      'PROVEFARMA': [],
+      'OTROS': []
+    };
+
+    // Clasificar sugerencias por proveedor
+    sugerencias.forEach(item => {
+      const proveedor = (item.proveedor || '').toUpperCase();
+      const registro = {
+        codigo: item.producto?.codigo || '',
+        nombre: item.producto?.nombre || '',
+        cantidad: item.cantidad_sugerida || 0,
+        precio: item.oferta?.precio_oferta || item.oferta?.precio_lista || 0
+      };
+
+      if (proveedor.includes('MEDIVEN')) {
+        proveedores['MEDIVEN'].push(registro);
+      } else if (proveedor.includes('PROVEFARMA')) {
+        proveedores['PROVEFARMA'].push(registro);
+      } else {
+        proveedores['OTROS'].push(registro);
       }
-    } catch (err) {
-      console.warn('No se pudo cargar consolidado:', err);
-    }
-  };
+    });
 
-  const generarSugerencias = async () => {
-    try {
-      setLoadingGenerar(true);
-      const response = await sugerenciasService.generar({ limite: 100, forzar_mapeo: true });
+    // Generar y descargar CSV para cada proveedor que tenga datos
+    const generarCSV = (datos, nombreProveedor) => {
+      if (datos.length === 0) return;
 
-      if (response.data.success) {
-        alert(`✅ Sugerencias generadas exitosamente\n\n📊 Estadísticas:\n- Productos críticos: ${response.data.estadisticas.total_criticos}\n- Sugerencias creadas: ${response.data.estadisticas.sugerencias_creadas}`);
-        await cargarSugerencias(activeTab, 1);
-        await cargarConsolidado();
-      }
-    } catch (err) {
-      console.error('Error generando sugerencias:', err);
-      alert('Error al generar sugerencias: ' + (err.response?.data?.message || err.message));
-    } finally {
-      setLoadingGenerar(false);
-    }
-  };
+      const headers = ['Codigo', 'Nombre Producto', 'Cantidad', 'Precio'];
+      const csvContent = [
+        headers.join(';'),
+        ...datos.map(row =>
+          [row.codigo, `"${row.nombre}"`, row.cantidad, row.precio].join(';')
+        )
+      ].join('\n');
 
-  const handleTabChange = (tab) => {
-    setActiveTab(tab);
-  };
+      const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `sugerencias_compra_${nombreProveedor.toLowerCase()}_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    };
 
-  const handlePageChange = (newPage) => {
-    if (newPage >= 1 && newPage <= pagination.total_pages) {
-      cargarSugerencias(activeTab, newPage);
-    }
+    // Descargar archivos automáticamente
+    setTimeout(() => generarCSV(proveedores['MEDIVEN'], 'MEDIVEN'), 100);
+    setTimeout(() => generarCSV(proveedores['PROVEFARMA'], 'PROVEFARMA'), 300);
   };
 
   const formatCurrency = (value) => {
@@ -121,33 +174,19 @@ const PurchaseSuggestions = () => {
 
   const getPrioridadColor = (prioridad) => {
     switch (prioridad) {
-      case 'alta': return 'bg-red-100 text-red-800';
-      case 'media': return 'bg-yellow-100 text-yellow-800';
-      case 'baja': return 'bg-green-100 text-green-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'critica': return 'bg-red-100 text-red-800 border-red-300';
+      case 'alta': return 'bg-orange-100 text-orange-800 border-orange-300';
+      case 'media': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
+      case 'baja': return 'bg-green-100 text-green-800 border-green-300';
+      default: return 'bg-gray-100 text-gray-800 border-gray-300';
     }
   };
 
-  const tabs = [
-    { id: 'bajo_stock', label: 'Bajo Stock', icon: AlertTriangle, color: 'red', count: conteos.bajo_stock },
-    { id: 'estacional', label: 'Estacionales', icon: Sun, color: 'orange', count: conteos.estacional },
-    { id: 'epidemiologico', label: 'Epidemiológicas', icon: Activity, color: 'blue', count: conteos.epidemiologico },
-  ];
-
-  const descargarExcelProveedor = async (nombreProveedor) => {
-    try {
-      const response = await sugerenciasService.exportExcel({ proveedor: nombreProveedor });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `orden_compra_${nombreProveedor}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (err) {
-      alert('Error al generar Excel: ' + (err.response?.data?.message || err.message));
-    }
+  const getMatchScoreColor = (score) => {
+    if (score >= 100) return 'text-green-600'; // Mapping exacto
+    if (score >= 80) return 'text-blue-600';   // Muy buena coincidencia
+    if (score >= 60) return 'text-yellow-600'; // Coincidencia aceptable
+    return 'text-red-600';
   };
 
   return (
@@ -157,27 +196,28 @@ const PurchaseSuggestions = () => {
         <h1 className="text-3xl font-bold text-gray-800">Sugerencias de Compra</h1>
         <div className="flex gap-3">
           <button
-            onClick={generarSugerencias}
-            disabled={loadingGenerar}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg transition-colors"
+            onClick={generarCSVsPorProveedor}
+            disabled={loading || sugerencias.length === 0}
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-4 py-2 rounded-lg transition-colors"
           >
-            {loadingGenerar ? (
-              <><RefreshCw size={20} className="animate-spin" /> Generando...</>
-            ) : (
-              <><RefreshCw size={20} /> Generar Sugerencias</>
-            )}
+            <FileDown size={20} /> Generar CSV Proveedores
           </button>
           <button
-            onClick={cargarConsolidado}
-            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors"
+            onClick={() => cargarSugerencias(true)}
+            disabled={loading}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-4 py-2 rounded-lg transition-colors"
           >
-            <ShoppingCart size={20} /> Ver Consolidado
+            {loading ? (
+              <><RefreshCw size={20} className="animate-spin" /> Cargando...</>
+            ) : (
+              <><RefreshCw size={20} /> Actualizar</>
+            )}
           </button>
         </div>
       </div>
 
-      {/* Tarjetas de resumen con conteos */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Tarjetas de resumen */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {loading ? (
           <>
             <SkeletonCard />
@@ -185,34 +225,43 @@ const PurchaseSuggestions = () => {
             <SkeletonCard />
           </>
         ) : (
-          tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            const colorClasses = {
-              red: { bg: 'bg-red-50', border: 'border-red-500', text: 'text-red-800', count: 'text-red-900', icon: 'text-red-500' },
-              orange: { bg: 'bg-orange-50', border: 'border-orange-500', text: 'text-orange-800', count: 'text-orange-900', icon: 'text-orange-500' },
-              blue: { bg: 'bg-blue-50', border: 'border-blue-500', text: 'text-blue-800', count: 'text-blue-900', icon: 'text-blue-500' },
-            }[tab.color];
-
-            return (
-              <button
-                key={tab.id}
-                onClick={() => handleTabChange(tab.id)}
-                className={`${colorClasses.bg} border-l-4 ${colorClasses.border} rounded-lg shadow p-6 text-left transition-all hover:shadow-lg ${isActive ? 'ring-2 ring-offset-2 ring-' + tab.color + '-500' : ''}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className={`${colorClasses.text} font-semibold`}>{tab.label}</p>
-                    <p className={`text-3xl font-bold ${colorClasses.count} mt-2`}>{tab.count}</p>
-                    <p className={`text-sm ${colorClasses.text} mt-1`}>
-                      {isActive ? 'Mostrando' : 'Click para ver'}
-                    </p>
-                  </div>
-                  <Icon size={40} className={colorClasses.icon} />
+          <>
+            {/* Total productos */}
+            <div className="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-600 font-medium">Total Productos</p>
+                  <p className="text-3xl font-bold text-blue-600 mt-2">{resumen.total_productos}</p>
+                  <p className="text-sm text-gray-500 mt-1">con demanda y bajo stock</p>
                 </div>
-              </button>
-            );
-          })
+                <Package size={40} className="text-blue-400" />
+              </div>
+            </div>
+
+            {/* Críticos */}
+            <div className="bg-white rounded-lg shadow p-6 border-l-4 border-red-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-600 font-medium">Críticos</p>
+                  <p className="text-3xl font-bold text-red-600 mt-2">{resumen.criticos}</p>
+                  <p className="text-sm text-gray-500 mt-1">&lt; 7 días de stock</p>
+                </div>
+                <AlertTriangle size={40} className="text-red-400" />
+              </div>
+            </div>
+
+            {/* Con oferta */}
+            <div className="bg-white rounded-lg shadow p-6 border-l-4 border-green-500">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-gray-600 font-medium">Con Oferta</p>
+                  <p className="text-3xl font-bold text-green-600 mt-2">{resumen.con_oferta}</p>
+                  <p className="text-sm text-gray-500 mt-1">ofertas encontradas</p>
+                </div>
+                <Tag size={40} className="text-green-400" />
+              </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -221,7 +270,7 @@ const PurchaseSuggestions = () => {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
           <AlertTriangle className="text-red-500" />
           <span className="text-red-700">{error}</span>
-          <button onClick={() => cargarSugerencias(activeTab, 1)} className="ml-auto text-red-600 hover:text-red-800 font-medium">
+          <button onClick={cargarSugerencias} className="ml-auto text-red-600 hover:text-red-800 font-medium">
             Reintentar
           </button>
         </div>
@@ -229,22 +278,13 @@ const PurchaseSuggestions = () => {
 
       {/* Tabla de sugerencias */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+        <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-gray-50">
           <div className="flex items-center gap-2">
-            {tabs.find(t => t.id === activeTab)?.icon && (
-              <div className={`text-${tabs.find(t => t.id === activeTab)?.color}-600`}>
-                {(() => { const Icon = tabs.find(t => t.id === activeTab)?.icon; return <Icon size={24} />; })()}
-              </div>
-            )}
-            <h2 className="text-xl font-semibold">
-              {tabs.find(t => t.id === activeTab)?.label}
-            </h2>
+            <ShoppingCart size={24} className="text-blue-600" />
+            <h2 className="text-xl font-semibold">Productos a Comprar</h2>
             <span className="text-sm text-gray-500 ml-2">
-              ({pagination.total_items} sugerencias)
+              ({sugerencias.length} sugerencias con demanda justificada)
             </span>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <span>Página {pagination.page} de {pagination.total_pages || 1}</span>
           </div>
         </div>
 
@@ -252,15 +292,14 @@ const PurchaseSuggestions = () => {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock Actual</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cant. Sugerida</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Precio Unit.</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Total</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  {activeTab === 'estacional' ? 'Confianza' : 'Prioridad'}
-                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stock</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Demanda</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Comprar</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Proveedor</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Oferta</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prioridad</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -268,58 +307,134 @@ const PurchaseSuggestions = () => {
                 [...Array(10)].map((_, i) => <SkeletonRow key={i} />)
               ) : sugerencias.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
+                  <td colSpan="8" className="px-6 py-12 text-center text-gray-500">
                     <div className="flex flex-col items-center gap-3">
                       <Filter size={48} className="text-gray-300" />
-                      <p className="text-lg font-medium">No hay sugerencias en esta categoría</p>
-                      <p className="text-sm">Haz clic en "Generar Sugerencias" para analizar tu inventario</p>
+                      <p className="text-lg font-medium">No hay sugerencias de compra</p>
+                      <p className="text-sm">Todos los productos con demanda tienen stock suficiente</p>
                     </div>
                   </td>
                 </tr>
               ) : (
-                sugerencias.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {item.producto?.nombre || item.producto?.descripcion || 'Sin nombre'}
+                sugerencias.map((item, index) => (
+                  <tr key={index} className="hover:bg-gray-50">
+                    {/* Código */}
+                    <td className="px-4 py-4">
+                      <p className="text-sm font-mono font-medium text-gray-700">
+                        {item.producto?.codigo || '-'}
+                      </p>
+                    </td>
+
+                    {/* Producto */}
+                    <td className="px-4 py-4">
+                      <div className="max-w-xs">
+                        <p className="text-sm font-medium text-gray-900 truncate" title={item.producto?.nombre}>
+                          {item.producto?.nombre || 'Sin nombre'}
                         </p>
-                        <p className="text-xs text-gray-500">{item.producto?.codigo}</p>
+                        {item.producto?.categoria && (
+                          <span className="inline-block mt-1 px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">
+                            {item.producto.categoria}
+                          </span>
+                        )}
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-red-600 font-semibold">
-                      {item.producto?.stock_actual || 0}
+
+                    {/* Stock */}
+                    <td className="px-4 py-4">
+                      <div className="text-center">
+                        <p className={`text-sm font-bold ${item.stock?.actual < 5 ? 'text-red-600' : 'text-orange-600'}`}>
+                          {item.stock?.actual || 0} / {item.stock?.minimo || 0} mín
+                        </p>
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-sm font-semibold text-blue-600">
-                      {item.cantidad_sugerida}
+
+                    {/* Demanda */}
+                    <td className="px-4 py-4">
+                      <div className="text-sm">
+                        <p className="font-medium text-gray-900">
+                          {item.demanda?.total_90_dias || 0} <span className="text-xs text-gray-500">/ 90 días</span>
+                        </p>
+                        {item.demanda?.dias_cobertura !== null && (
+                          <p className={`text-xs ${item.demanda.dias_cobertura < 7 ? 'text-red-600' : item.demanda.dias_cobertura < 14 ? 'text-orange-600' : 'text-gray-500'}`}>
+                            <Clock size={12} className="inline mr-1" />
+                            {item.demanda.dias_cobertura} días cobertura
+                          </p>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      {item.proveedor_recomendado?.nombre || 'Sin proveedor'}
+
+                    {/* Cantidad a comprar */}
+                    <td className="px-4 py-4">
+                      <div className="text-center">
+                        <p className="text-lg font-bold text-blue-600">
+                          {item.cantidad_sugerida}
+                        </p>
+                        {item.estacional?.ajuste_aplicado && (
+                          <div className="mt-1">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-700 text-xs font-medium rounded-full border border-orange-300">
+                              📈 +{item.estacional.cantidad_extra} estacional
+                            </span>
+                            <p className="text-xs text-orange-600 mt-0.5">
+                              {item.estacional.mes_proximo}: Alta demanda
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      {formatCurrency(item.precio_unitario)}
-                      {item.tiene_oferta && (
-                        <span className="ml-2 bg-green-100 text-green-800 px-2 py-0.5 rounded text-xs">
-                          -{item.descuento_porcentaje}%
-                        </span>
-                      )}
+
+                    {/* Proveedor */}
+                    <td className="px-4 py-4">
+                      <p className="text-sm font-medium text-gray-900">
+                        {item.proveedor || 'Sin proveedor'}
+                      </p>
                     </td>
-                    <td className="px-6 py-4 text-sm font-semibold text-gray-900">
-                      {formatCurrency(item.cantidad_sugerida * (item.precio_unitario || 0))}
-                    </td>
-                    <td className="px-6 py-4">
-                      {activeTab === 'estacional' ? (
-                        <div className="flex items-center">
-                          <TrendingUp size={16} className="text-green-600 mr-1" />
-                          <span className="font-semibold text-green-600">
-                            {((item.confianza_ml || 0) * 100).toFixed(0)}%
-                          </span>
+
+                    {/* Oferta */}
+                    <td className="px-4 py-4">
+                      {item.oferta ? (
+                        <div className="text-sm">
+                          <div className="flex items-center gap-1">
+                            <span className="text-green-600 font-bold">
+                              {formatCurrency(item.oferta.precio_oferta)}
+                            </span>
+                            {item.oferta.descuento > 0 && (
+                              <span className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded text-xs font-medium">
+                                -{item.oferta.descuento}%
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-400 line-through">
+                            {formatCurrency(item.oferta.precio_lista)}
+                          </p>
+                          {item.oferta.codigo && (
+                            <p className="text-xs text-blue-600 font-mono">
+                              Cód: {item.oferta.codigo}
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-500 truncate max-w-[150px]" title={item.oferta.nombre}>
+                            {item.oferta.nombre}
+                          </p>
+                          {item.oferta.dias_vigencia !== undefined && (
+                            <p className={`text-xs ${item.oferta.dias_vigencia < 7 ? 'text-red-500' : 'text-gray-500'}`}>
+                              {item.oferta.dias_vigencia} días vigencia
+                            </p>
+                          )}
+                          {item.oferta.match_score && (
+                            <p className={`text-xs ${getMatchScoreColor(item.oferta.match_score)}`}>
+                              Match: {item.oferta.match_score >= 100 ? 'Exacto' : `${item.oferta.match_score}%`}
+                            </p>
+                          )}
                         </div>
                       ) : (
-                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getPrioridadColor(item.prioridad)}`}>
-                          {(item.prioridad || 'media').toUpperCase()}
-                        </span>
+                        <span className="text-gray-400 text-sm">Sin oferta</span>
                       )}
+                    </td>
+
+                    {/* Prioridad */}
+                    <td className="px-4 py-4">
+                      <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getPrioridadColor(item.prioridad)}`}>
+                        {(item.prioridad || 'media').toUpperCase()}
+                      </span>
                     </td>
                   </tr>
                 ))
@@ -327,113 +442,19 @@ const PurchaseSuggestions = () => {
             </tbody>
           </table>
         </div>
-
-        {/* Paginación */}
-        {pagination.total_pages > 1 && (
-          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between bg-gray-50">
-            <div className="text-sm text-gray-600">
-              Mostrando {((pagination.page - 1) * pagination.page_size) + 1} - {Math.min(pagination.page * pagination.page_size, pagination.total_items)} de {pagination.total_items}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => handlePageChange(pagination.page - 1)}
-                disabled={!pagination.has_previous}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft size={20} />
-              </button>
-
-              {/* Números de página */}
-              <div className="flex gap-1">
-                {[...Array(Math.min(5, pagination.total_pages))].map((_, i) => {
-                  let pageNum;
-                  if (pagination.total_pages <= 5) {
-                    pageNum = i + 1;
-                  } else if (pagination.page <= 3) {
-                    pageNum = i + 1;
-                  } else if (pagination.page >= pagination.total_pages - 2) {
-                    pageNum = pagination.total_pages - 4 + i;
-                  } else {
-                    pageNum = pagination.page - 2 + i;
-                  }
-
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => handlePageChange(pageNum)}
-                      className={`px-3 py-1 rounded-lg text-sm font-medium ${
-                        pagination.page === pageNum
-                          ? 'bg-blue-600 text-white'
-                          : 'border border-gray-300 hover:bg-gray-100'
-                      }`}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                onClick={() => handlePageChange(pagination.page + 1)}
-                disabled={!pagination.has_next}
-                className="p-2 rounded-lg border border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronRight size={20} />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Consolidado por proveedor */}
-      {consolidado && Object.keys(consolidado).length > 0 && (
-        <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg shadow-lg p-6 border-2 border-purple-200">
-          <div className="flex items-center gap-3 mb-6">
-            <ShoppingCart size={28} className="text-purple-600" />
-            <div>
-              <h2 className="text-2xl font-bold text-purple-900">Órdenes de Compra Consolidadas</h2>
-              <p className="text-sm text-purple-700">Agrupadas por proveedor con selección del mejor precio</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Object.entries(consolidado).map(([proveedorNombre, data]) => (
-              <div key={proveedorNombre} className="bg-white rounded-lg shadow-md border overflow-hidden">
-                <div className={`p-4 ${data.cumple_minimo ? 'bg-green-50' : 'bg-red-50'}`}>
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h3 className="text-lg font-bold text-gray-900">{proveedorNombre}</h3>
-                      <p className="text-sm text-gray-600">{data.sugerencias?.length || 0} productos</p>
-                    </div>
-                    <Package size={20} className="text-gray-500" />
-                  </div>
-
-                  <div className="mt-3">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-sm text-gray-600">Total:</span>
-                      <span className="text-xl font-bold">{formatCurrency(data.total)}</span>
-                    </div>
-                    {data.cumple_minimo ? (
-                      <div className="text-green-700 text-sm font-medium">✓ Cumple mínimo</div>
-                    ) : (
-                      <div className="text-red-700 text-sm font-medium">
-                        ⚠ Falta {formatCurrency(data.minimo_requerido - data.total)}
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() => descargarExcelProveedor(proveedorNombre)}
-                    className="mt-3 w-full flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-                  >
-                    <Download size={16} /> Descargar Excel
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Leyenda */}
+      <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-600">
+        <h3 className="font-semibold mb-2">Criterios de selección:</h3>
+        <ul className="list-disc list-inside space-y-1">
+          <li><strong>Demanda justificada:</strong> Solo productos con ventas en los últimos 90 días</li>
+          <li><strong>Prioridad crítica:</strong> Menos de 7 días de cobertura de stock</li>
+          <li><strong>Ofertas:</strong> Búsqueda por código exacto o similitud de nombre (60%+ coincidencia)</li>
+          <li><strong>Match Exacto:</strong> Producto vinculado directamente con catálogo del proveedor</li>
+          <li><strong className="text-orange-600">📈 Ajuste Estacional:</strong> Cantidad aumentada +25% para categorías con alta demanda proyectada el próximo mes</li>
+        </ul>
+      </div>
     </div>
   );
 };

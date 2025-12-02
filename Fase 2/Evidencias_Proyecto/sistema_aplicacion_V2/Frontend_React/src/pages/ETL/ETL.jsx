@@ -13,6 +13,8 @@ function ETL() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [progress, setProgress] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [truncating, setTruncating] = useState(false);
+  const [truncateMessage, setTruncateMessage] = useState(null);
 
   useEffect(() => {
     loadData();
@@ -95,10 +97,10 @@ function ETL() {
       setProgress(null);
 
       // Usar modo amplio (strict_mode=false) para buscar todos los correos con Excel/CSV
-      const response = await etlService.runManual(2, false);
+      const response = await etlService.runManual(5, false);
 
       if (response.data.success) {
-        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar y mensajes con palabras clave (últimos 2 días)...');
+        setSuccessMessage('✓ ETL iniciado. Buscando correos de Mediven/Socofar/Provefarma y mensajes con palabras clave (últimos 5 días)...');
         setIsRunning(true); // Iniciar polling de progreso
       }
     } catch (err) {
@@ -110,6 +112,45 @@ function ETL() {
       if (errorMsg.includes('autenticado') || errorMsg.includes('Gmail')) {
         setGmailAuthenticated(false);
       }
+    }
+  };
+
+  const handleTruncateTables = async () => {
+    const confirmacion = window.confirm(
+      '⚠️ ADVERTENCIA: Esta acción vaciará TODAS las tablas de datos (ventas, productos, clientes, ofertas, etc.).\n\n' +
+      'Esta acción es IRREVERSIBLE.\n\n' +
+      '¿Estás seguro de que deseas continuar?'
+    );
+
+    if (!confirmacion) return;
+
+    try {
+      setTruncating(true);
+      setTruncateMessage(null);
+
+      const response = await etlService.truncateTables();
+
+      if (response.data.success) {
+        setTruncateMessage({
+          type: 'success',
+          text: `✓ ${response.data.message}`,
+          details: response.data.tablas_vaciadas
+        });
+        // Recargar datos
+        loadData();
+      } else {
+        setTruncateMessage({
+          type: 'error',
+          text: response.data.error || 'Error al vaciar tablas'
+        });
+      }
+    } catch (err) {
+      setTruncateMessage({
+        type: 'error',
+        text: err.response?.data?.error || 'Error al vaciar tablas'
+      });
+    } finally {
+      setTruncating(false);
     }
   };
 
@@ -369,6 +410,46 @@ function ETL() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Sección de mantenimiento - Discreto al final */}
+      <div className="mt-8 pt-6 border-t border-gray-200">
+        <details className="text-gray-400">
+          <summary className="cursor-pointer text-xs hover:text-gray-600 select-none">
+            Opciones avanzadas de mantenimiento
+          </summary>
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <p className="text-xs text-gray-500 mb-3">
+              Estas opciones son para administradores. Usar con precaución.
+            </p>
+            <button
+              onClick={handleTruncateTables}
+              disabled={truncating}
+              className={`px-4 py-2 text-xs rounded transition-colors ${
+                truncating
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-red-100 text-red-700 hover:bg-red-200 border border-red-300'
+              }`}
+            >
+              {truncating ? 'Vaciando tablas...' : 'Vaciar todas las tablas de datos'}
+            </button>
+
+            {truncateMessage && (
+              <div className={`mt-3 p-3 rounded text-xs ${
+                truncateMessage.type === 'success'
+                  ? 'bg-green-50 border border-green-200 text-green-700'
+                  : 'bg-red-50 border border-red-200 text-red-700'
+              }`}>
+                <p className="font-medium">{truncateMessage.text}</p>
+                {truncateMessage.details && (
+                  <p className="mt-1 text-gray-500">
+                    Tablas vaciadas: {truncateMessage.details.join(', ')}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </details>
       </div>
 
     </div>

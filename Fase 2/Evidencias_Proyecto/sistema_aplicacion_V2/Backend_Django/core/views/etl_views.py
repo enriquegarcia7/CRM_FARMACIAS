@@ -5,6 +5,7 @@ from rest_framework import status
 from core.tasks import run_offer_etl_task
 from core.models import ETLLog
 from django.conf import settings
+from django.db import connection
 import logging
 import json
 import os
@@ -152,6 +153,117 @@ def get_etl_progress(request):
 
     except Exception as e:
         logger.error(f"Error getting ETL progress: {e}")
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_etl_diagnostic(request):
+    """
+    Obtener información de diagnóstico de los correos encontrados.
+    GET /api/etl/diagnostic/?days_back=3
+
+    Muestra todos los correos encontrados y su estado de validación,
+    útil para diagnosticar por qué algunos correos no se procesan.
+    """
+    try:
+        days_back = int(request.GET.get('days_back', 3))
+
+        logger.info(f"🔍 ETL Diagnostic requested (days_back={days_back})")
+
+        from core.services.gmail_service import GmailService
+
+        gmail_service = GmailService()
+        diagnostic_data = gmail_service.get_diagnostic_info(days_back=days_back)
+
+        logger.info(f"✅ Diagnostic completed: {diagnostic_data['total_found']} messages found")
+
+        return Response({
+            'success': True,
+            'diagnostic': diagnostic_data
+        })
+
+    except FileNotFoundError as e:
+        # Gmail no autenticado
+        logger.warning(f"Gmail not authenticated: {e}")
+        return Response({
+            'success': False,
+            'error': 'Gmail no está autenticado. Por favor, autentícate primero.',
+            'needs_auth': True
+        }, status=status.HTTP_401_UNAUTHORIZED)
+
+    except Exception as e:
+        logger.error(f"Error getting ETL diagnostic: {e}", exc_info=True)
+        return Response({
+            'success': False,
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def truncate_tables(request):
+    """
+    Vacía todas las tablas que se poblan con Excel y ETL.
+    POST /api/etl/truncate/
+
+    ⚠️ ADVERTENCIA: Esta acción es irreversible.
+    """
+    try:
+        tablas = [
+            # Ventas y detalles
+            'core_detalleventa',
+            'core_venta',
+            'core_transaccion',
+            'ventas_historicas',
+
+            # Productos e inventario
+            'core_producto',
+
+            # Clientes
+            'core_cliente',
+
+            # ETL - Ofertas
+            'ofertas_laboratorio',
+            'productos_catalogo',
+            'producto_proveedor_mapping',
+            'core_sugerenciacompra',
+
+            # Auxiliares
+            'core_laboratorio',
+            'core_categoria',
+
+            # Logs ETL
+            'etl_logs',
+            'archivos_procesados',
+        ]
+
+        tablas_vaciadas = []
+        errores = []
+
+        with connection.cursor() as cursor:
+            for tabla in tablas:
+                try:
+                    cursor.execute(f'TRUNCATE TABLE {tabla} RESTART IDENTITY CASCADE;')
+                    tablas_vaciadas.append(tabla)
+                    logger.info(f'✅ Tabla {tabla} vaciada')
+                except Exception as e:
+                    errores.append({'tabla': tabla, 'error': str(e)[:50]})
+                    logger.warning(f'⚠️ Error vaciando {tabla}: {str(e)[:50]}')
+
+        logger.info(f'🗑️ Truncate completado: {len(tablas_vaciadas)} tablas vaciadas')
+
+        return Response({
+            'success': True,
+            'message': f'Se vaciaron {len(tablas_vaciadas)} tablas correctamente',
+            'tablas_vaciadas': tablas_vaciadas,
+            'errores': errores if errores else None
+        })
+
+    except Exception as e:
+        logger.error(f"Error truncating tables: {e}", exc_info=True)
         return Response({
             'success': False,
             'error': str(e)

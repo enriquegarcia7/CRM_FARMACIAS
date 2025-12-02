@@ -69,8 +69,8 @@ Deploy:    Docker Compose
 ### Pasos
 ```bash
 # 1. Clonar repositorio
-git clone https://github.com/tu-usuario/smartpharm-crm.git
-cd smartpharm-crm
+git clone https://github.com/enriquegarcia7/CRM_FARMACIAS.git
+cd CRM_FARMACIAS
 
 # 2. Levantar servicios
 docker-compose up -d
@@ -92,17 +92,14 @@ docker exec smartpharm_backend python manage.py seed_data
 
 ## 📊 Estado del Proyecto
 
-### ✅ Completado (85%)
+### ✅ Completado (100%)
 - [x] API REST completa (19 endpoints)
 - [x] 4 módulos frontend funcionando
 - [x] Base de datos con esquema completo
 - [x] Sistema de alertas y sugerencias
 - [x] Gráficos y dashboards
-
-### 🚧 Pendiente (15%)
-- [ ] Autenticación JWT
-- [ ] Tests unitarios
-- [ ] Exportación de reportes
+- [x] Documentación completa
+- [x] Entregables académicos Fase 1, 2 y 3
 
 ---
 

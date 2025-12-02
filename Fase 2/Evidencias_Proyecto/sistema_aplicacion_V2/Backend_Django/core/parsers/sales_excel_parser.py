@@ -3,6 +3,7 @@ import logging
 import hashlib
 from decimal import Decimal
 from django.db import transaction, IntegrityError
+from django.db.models import Sum
 from django.utils import timezone
 from datetime import datetime
 from core.models import Venta, DetalleVenta, Cliente, Producto, MetodoPago, EstadoVenta
@@ -190,46 +191,70 @@ class SalesExcelParser:
     @transaction.atomic
     def _load_sales(self, df):
         """
-        Carga ventas en la base de datos.
+        Carga ventas en la base de datos con validación inteligente.
 
-        ESTRATEGIA CORREGIDA:
-        - Cada FILA del Excel es un DetalleVenta independiente
-        - Una Venta se agrupa por: NUMERO DOCUMENTO + FECHA + CLIENTE (RUT)
-        - Primero elimina ventas existentes para evitar duplicados
-        - Los códigos de producto se mantienen EXACTAMENTE como en el Excel
+        ESTRATEGIA:
+        1. NÚMERO DE DOCUMENTO es la clave principal de validación
+           - Si ya existe → NO insertar venta, pero actualizar datos del cliente si hay nuevos
+        2. RUT del cliente es secundario
+           - Si el cliente existe → Actualizar nombre/correo si vienen datos mejores
+        3. NUNCA se borran ventas existentes
+        4. Los códigos de producto se mantienen EXACTAMENTE como en el Excel
+
+        Jerarquía:
+        - Número documento existe → Solo actualizar cliente
+        - Cliente existe → Actualizar nombre/correo si hay mejores datos
+        - Todo nuevo → Insertar venta y crear cliente
         """
         logger.info(f"🚀 Iniciando procesamiento de {len(df)} filas")
 
-        # PASO 0: LIMPIAR VENTAS Y DETALLES EXISTENTES
-        logger.info("🗑️ Limpiando ventas anteriores...")
-        detalles_count = DetalleVenta.objects.count()
-        ventas_count = Venta.objects.count()
-        DetalleVenta.objects.all().delete()
-        Venta.objects.all().delete()
-        logger.info(f"✅ Eliminados {ventas_count} ventas y {detalles_count} detalles anteriores")
+        # PASO 0: Cargar combinaciones (numero_documento, codigo_producto) existentes
+        # Un número de documento puede tener múltiples productos (líneas de detalle)
+        # Solo es duplicado si el mismo documento tiene el mismo producto
+        logger.info("🔍 Cargando detalles existentes para validación...")
+        detalles_existentes = set(
+            DetalleVenta.objects.filter(
+                venta__numero__isnull=False
+            ).exclude(
+                venta__numero=''
+            ).values_list('venta__numero', 'producto__codigo')
+        )
+        logger.info(f"✅ {len(detalles_existentes)} combinaciones (documento, producto) ya registradas")
+
+        # También cargar ventas existentes para evitar duplicar la cabecera
+        ventas_existentes_numeros = set(
+            Venta.objects.exclude(numero__isnull=True).exclude(numero='').values_list('numero', flat=True)
+        )
 
         # 1. PRE-CARGAR PRODUCTOS EN MEMORIA
         logger.info("📦 Cargando productos en memoria...")
         productos_dict = {p.codigo: p for p in Producto.objects.all()}
         logger.info(f"✅ {len(productos_dict)} productos cargados")
 
-        # 2. PRE-CARGAR CLIENTES EN MEMORIA
+        # 2. PRE-CARGAR CLIENTES EN MEMORIA (por RUT y por correo)
         logger.info("👥 Cargando clientes en memoria...")
         clientes_dict = {c.rut: c for c in Cliente.objects.all()}
-        logger.info(f"✅ {len(clientes_dict)} clientes cargados")
+        # Índice por correo para detectar duplicados por RUT mal digitado
+        clientes_por_correo = {
+            c.correo.lower(): c for c in Cliente.objects.all()
+            if c.correo and c.correo.strip()
+        }
+        logger.info(f"✅ {len(clientes_dict)} clientes cargados ({len(clientes_por_correo)} con correo)")
 
         # 2.5. OBTENER DEFAULTS
         metodo_pago_default = MetodoPago.objects.filter(codigo='efectivo').first()
         estado_default = EstadoVenta.objects.filter(codigo='completada').first()
 
-        # 3. PROCESAR FILAS - Agrupar por (numero_doc, fecha, rut)
+        # 3. PROCESAR FILAS - Recolectar datos de clientes y ventas nuevas
         ventas_dict = {}  # key: (numero_doc, fecha, rut) -> {venta_info, items: []}
-        clientes_a_crear = {}
+        detalles_nuevos_para_ventas_existentes = {}  # numero_doc -> [items nuevos]
+        clientes_a_procesar = {}  # Clientes que necesitan creación o actualización
         productos_a_crear = {}
 
         logger.info("📝 Procesando filas del Excel...")
         filas_procesadas = 0
         filas_error = 0
+        filas_duplicadas = 0
 
         for index, row in df.iterrows():
             try:
@@ -247,41 +272,38 @@ class SalesExcelParser:
                     filas_error += 1
                     continue
 
-                # Datos del cliente
+                # Datos del cliente desde esta fila
                 nombre_cliente = self._clean_string(row.get('NOMBRE_CLIENTE', ''))
                 correo_cliente = self._clean_string(row.get('CORREO', ''))
-
-                # Detectar si el nombre es genérico (Cliente_XXXX, Cliente General, etc.)
                 nombre_es_real = self._es_nombre_real(nombre_cliente)
 
-                if cliente_rut not in clientes_dict and cliente_rut not in clientes_a_crear:
-                    # Cliente nuevo - crear
-                    clientes_a_crear[cliente_rut] = {
-                        'rut': cliente_rut,
-                        'nombre': nombre_cliente if nombre_es_real else f'Cliente {cliente_rut}',
-                        'correo': correo_cliente if correo_cliente else None,
-                        'es_nuevo': True
-                    }
-                elif cliente_rut in clientes_a_crear and nombre_es_real:
-                    # Si ya está en clientes_a_crear pero con nombre genérico, actualizar
-                    if not self._es_nombre_real(clientes_a_crear[cliente_rut]['nombre']):
-                        clientes_a_crear[cliente_rut]['nombre'] = nombre_cliente
-                elif cliente_rut in clientes_dict and nombre_es_real:
-                    # Cliente existe en BD - verificar si necesita actualización
-                    cliente_existente = clientes_dict[cliente_rut]
-                    if not self._es_nombre_real(cliente_existente.nombre):
-                        # Agregar a clientes_a_crear para actualización
-                        if cliente_rut not in clientes_a_crear:
-                            clientes_a_crear[cliente_rut] = {
-                                'rut': cliente_rut,
-                                'nombre': nombre_cliente,
-                                'correo': correo_cliente if correo_cliente else None,
-                                'es_nuevo': False
-                            }
+                # Número de documento
+                numero_doc = str(row.get('NUMERO', '')).strip()
 
                 # Código y nombre del producto (EXACTAMENTE como en Excel)
                 codigo_producto = self._clean_string(row.get('CODIGO', ''))
                 nombre_producto = self._clean_string(row.get('PRODUCTO', ''))
+
+                # SIEMPRE procesar datos del cliente (incluso si el detalle ya existe)
+                # Esto permite actualizar nombre/correo desde cualquier fila del Excel
+                # También detecta si el correo ya existe en otro cliente (RUT mal digitado)
+                cliente_rut_final = self._procesar_datos_cliente(
+                    cliente_rut, nombre_cliente, correo_cliente, nombre_es_real,
+                    clientes_dict, clientes_a_procesar, clientes_por_correo
+                )
+                # Usar el RUT final (puede ser diferente si se detectó duplicado por correo)
+                cliente_rut = cliente_rut_final
+
+                # ============================================================
+                # VALIDACIÓN: ¿Esta combinación (documento + producto) ya existe?
+                # Un documento puede tener múltiples productos diferentes
+                # Solo es duplicado si el mismo documento tiene el mismo producto
+                # ============================================================
+                detalle_ya_existe = numero_doc and codigo_producto and (numero_doc, codigo_producto) in detalles_existentes
+
+                if detalle_ya_existe:
+                    filas_duplicadas += 1
+                    continue
                 if not codigo_producto:
                     filas_error += 1
                     continue
@@ -305,29 +327,37 @@ class SalesExcelParser:
                     if neto > 0 and cantidad > 0:
                         precio_unitario = neto / cantidad
 
-                # Número de documento
-                numero_doc = str(row.get('NUMERO', '')).strip()
-
-                # KEY: Agrupar por (numero_doc, fecha, cliente_rut)
-                key = (numero_doc, fecha.date() if hasattr(fecha, 'date') else fecha, cliente_rut)
-
-                if key not in ventas_dict:
-                    ventas_dict[key] = {
-                        'tipo_documento': self._clean_string(row.get('TIPO_DOCUMENTO', '')),
-                        'numero': numero_doc,
-                        'fecha': fecha,
-                        'cliente_rut': cliente_rut,
-                        'items': []
-                    }
-
-                # Agregar item (detalle)
-                ventas_dict[key]['items'].append({
+                # Crear item de detalle
+                item_detalle = {
                     'codigo_producto': codigo_producto,
                     'nombre_producto': nombre_producto,
                     'cantidad': cantidad,
                     'precio_unitario': precio_unitario,
                     'neto': self._parse_precio(row.get('NETO', 0))
-                })
+                }
+
+                # ¿El documento ya existe en BD pero este producto es nuevo?
+                venta_existe_en_bd = numero_doc and numero_doc in ventas_existentes_numeros
+
+                if venta_existe_en_bd:
+                    # Agregar detalle nuevo a venta existente
+                    if numero_doc not in detalles_nuevos_para_ventas_existentes:
+                        detalles_nuevos_para_ventas_existentes[numero_doc] = []
+                    detalles_nuevos_para_ventas_existentes[numero_doc].append(item_detalle)
+                else:
+                    # Venta nueva - agrupar por (numero_doc, fecha, cliente_rut)
+                    key = (numero_doc, fecha.date() if hasattr(fecha, 'date') else fecha, cliente_rut)
+
+                    if key not in ventas_dict:
+                        ventas_dict[key] = {
+                            'tipo_documento': self._clean_string(row.get('TIPO_DOCUMENTO', '')),
+                            'numero': numero_doc,
+                            'fecha': fecha,
+                            'cliente_rut': cliente_rut,
+                            'items': []
+                        }
+
+                    ventas_dict[key]['items'].append(item_detalle)
 
                 filas_procesadas += 1
 
@@ -335,20 +365,23 @@ class SalesExcelParser:
                 filas_error += 1
                 continue
 
-        logger.info(f"✅ {filas_procesadas} filas procesadas, {filas_error} errores")
-        logger.info(f"📊 {len(ventas_dict)} ventas únicas identificadas")
+        logger.info(f"✅ {filas_procesadas} filas nuevas procesadas")
+        logger.info(f"⏭️ {filas_duplicadas} filas omitidas (documento+producto ya existe)")
+        logger.info(f"❌ {filas_error} filas con errores")
+        logger.info(f"📊 {len(ventas_dict)} ventas nuevas a insertar")
+        logger.info(f"📊 {len(detalles_nuevos_para_ventas_existentes)} documentos existentes con productos nuevos")
 
-        # 4. CREAR CLIENTES FALTANTES Y ACTUALIZAR NOMBRES REALES
-        if clientes_a_crear:
-            logger.info(f"👥 Procesando {len(clientes_a_crear)} clientes...")
+        self.stats['ventas_duplicadas'] = filas_duplicadas
 
-            # Separar clientes nuevos de los que necesitan actualización
+        # 4. CREAR/ACTUALIZAR CLIENTES
+        if clientes_a_procesar:
+            logger.info(f"👥 Procesando {len(clientes_a_procesar)} clientes...")
+
             clientes_nuevos = []
             clientes_actualizar = []
 
-            for rut, d in clientes_a_crear.items():
+            for rut, d in clientes_a_procesar.items():
                 if d.get('es_nuevo', True):
-                    # Cliente nuevo
                     clientes_nuevos.append(Cliente(
                         rut=d['rut'],
                         nombre=d['nombre'],
@@ -357,26 +390,35 @@ class SalesExcelParser:
                         direccion=''
                     ))
                 else:
-                    # Cliente existente que necesita actualización
                     cliente_existente = clientes_dict.get(rut)
                     if cliente_existente:
                         clientes_actualizar.append((cliente_existente, d['nombre'], d.get('correo')))
 
-            # Crear nuevos clientes
             if clientes_nuevos:
                 Cliente.objects.bulk_create(clientes_nuevos, ignore_conflicts=True)
                 logger.info(f"✅ {len(clientes_nuevos)} clientes nuevos creados")
 
-            # Actualizar nombres de clientes existentes
             if clientes_actualizar:
                 for cliente, nombre_nuevo, correo_nuevo in clientes_actualizar:
-                    cliente.nombre = nombre_nuevo
-                    if correo_nuevo and not cliente.correo:
+                    actualizado = False
+                    if nombre_nuevo and nombre_nuevo != cliente.nombre:
+                        cliente.nombre = nombre_nuevo
+                        actualizado = True
+                    if correo_nuevo and correo_nuevo != cliente.correo:
                         cliente.correo = correo_nuevo
-                    cliente.save()
-                logger.info(f"✅ {len(clientes_actualizar)} clientes actualizados con nombre real")
+                        actualizado = True
+                    if actualizado:
+                        cliente.save()
+                logger.info(f"✅ {len(clientes_actualizar)} clientes actualizados (nombre/correo)")
 
-            clientes_dict.update({c.rut: c for c in Cliente.objects.filter(rut__in=clientes_a_crear.keys())})
+            # Actualizar diccionarios con los clientes creados/actualizados
+            clientes_actualizados = list(Cliente.objects.filter(rut__in=clientes_a_procesar.keys()))
+            clientes_dict.update({c.rut: c for c in clientes_actualizados})
+            # También actualizar índice por correo
+            for c in clientes_actualizados:
+                if c.correo and c.correo.strip():
+                    clientes_por_correo[c.correo.lower()] = c
+
             self.stats['clientes_creados'] = len(clientes_nuevos)
             self.stats['clientes_actualizados'] = len(clientes_actualizar)
 
@@ -400,74 +442,213 @@ class SalesExcelParser:
             self.stats['productos_creados'] = len(productos_a_crear)
             logger.info(f"✅ Productos creados")
 
-        # 6. CREAR VENTAS
-        logger.info(f"💳 Creando {len(ventas_dict)} ventas...")
-        ventas_objs = []
-        ventas_items_map = []  # Para mapear venta -> items
+        # 5.5. AGREGAR DETALLES NUEVOS A VENTAS EXISTENTES
+        if detalles_nuevos_para_ventas_existentes:
+            logger.info(f"📝 Agregando productos nuevos a {len(detalles_nuevos_para_ventas_existentes)} ventas existentes...")
 
-        for key, venta_data in ventas_dict.items():
-            cliente = clientes_dict.get(venta_data['cliente_rut'])
-            if not cliente:
-                continue
+            # Obtener las ventas existentes por número de documento
+            ventas_existentes_obj = {
+                v.numero: v for v in Venta.objects.filter(
+                    numero__in=detalles_nuevos_para_ventas_existentes.keys()
+                )
+            }
 
-            total = sum(item['cantidad'] * item['precio_unitario'] for item in venta_data['items'])
-            fecha_venta = venta_data['fecha']
-            if hasattr(fecha_venta, 'date'):
-                fecha_venta = datetime.combine(fecha_venta.date(), datetime.min.time())
-
-            venta = Venta(
-                tipo_documento=venta_data['tipo_documento'] or None,
-                numero=venta_data['numero'] or None,
-                cliente=cliente,
-                fecha=fecha_venta,
-                total=total,
-                metodo_pago=metodo_pago_default,
-                estado=estado_default
-            )
-            ventas_objs.append(venta)
-            ventas_items_map.append(venta_data['items'])
-
-        # Insertar ventas en lotes
-        batch_size = 5000
-        ventas_creadas = []
-        for i in range(0, len(ventas_objs), batch_size):
-            batch = ventas_objs[i:i + batch_size]
-            created = Venta.objects.bulk_create(batch)
-            ventas_creadas.extend(created)
-            logger.info(f"  ✓ Ventas insertadas: {len(ventas_creadas)}/{len(ventas_objs)}")
-
-        self.stats['ventas_insertadas'] = len(ventas_creadas)
-        logger.info(f"✅ {len(ventas_creadas)} ventas insertadas")
-
-        # 7. CREAR DETALLES
-        logger.info(f"📝 Creando detalles de venta...")
-        detalles_objs = []
-
-        for venta, items in zip(ventas_creadas, ventas_items_map):
-            for item in items:
-                producto = productos_dict.get(item['codigo_producto'])
-                if not producto:
-                    self.stats['productos_no_encontrados'] += 1
+            detalles_para_ventas_existentes = []
+            for numero_doc, items in detalles_nuevos_para_ventas_existentes.items():
+                venta = ventas_existentes_obj.get(numero_doc)
+                if not venta:
                     continue
 
-                subtotal = item['cantidad'] * item['precio_unitario']
-                detalles_objs.append(DetalleVenta(
-                    venta=venta,
-                    producto=producto,
-                    cantidad=item['cantidad'],
-                    precio_unitario=item['precio_unitario'],
-                    subtotal=subtotal
-                ))
+                for item in items:
+                    producto = productos_dict.get(item['codigo_producto'])
+                    if not producto:
+                        self.stats['productos_no_encontrados'] += 1
+                        continue
 
-        # Insertar detalles en lotes
-        for i in range(0, len(detalles_objs), batch_size):
-            batch = detalles_objs[i:i + batch_size]
-            DetalleVenta.objects.bulk_create(batch)
-            logger.info(f"  ✓ Detalles insertados: {min(i + batch_size, len(detalles_objs))}/{len(detalles_objs)}")
+                    subtotal = item['cantidad'] * item['precio_unitario']
+                    detalles_para_ventas_existentes.append(DetalleVenta(
+                        venta=venta,
+                        producto=producto,
+                        cantidad=item['cantidad'],
+                        precio_unitario=item['precio_unitario'],
+                        subtotal=subtotal
+                    ))
 
-        self.stats['detalles_insertados'] = len(detalles_objs)
-        logger.info(f"✅ {len(detalles_objs)} detalles insertados")
-        logger.info(f"📊 RESUMEN: {self.stats['ventas_insertadas']} ventas, {self.stats['detalles_insertados']} detalles")
+            if detalles_para_ventas_existentes:
+                DetalleVenta.objects.bulk_create(detalles_para_ventas_existentes)
+                logger.info(f"✅ {len(detalles_para_ventas_existentes)} detalles agregados a ventas existentes")
+
+                # Actualizar totales de las ventas afectadas
+                for numero_doc in detalles_nuevos_para_ventas_existentes.keys():
+                    venta = ventas_existentes_obj.get(numero_doc)
+                    if venta:
+                        nuevo_total = DetalleVenta.objects.filter(venta=venta).aggregate(
+                            total=Sum('subtotal')
+                        )['total'] or 0
+                        venta.total = nuevo_total
+                        venta.save(update_fields=['total'])
+
+                self.stats['detalles_insertados'] += len(detalles_para_ventas_existentes)
+
+        # 6. CREAR VENTAS NUEVAS (solo las que no existen)
+        if ventas_dict:
+            logger.info(f"💳 Creando {len(ventas_dict)} ventas nuevas...")
+            ventas_objs = []
+            ventas_items_map = []
+
+            for key, venta_data in ventas_dict.items():
+                cliente = clientes_dict.get(venta_data['cliente_rut'])
+                if not cliente:
+                    continue
+
+                total = sum(item['cantidad'] * item['precio_unitario'] for item in venta_data['items'])
+                fecha_venta = venta_data['fecha']
+                if hasattr(fecha_venta, 'date'):
+                    fecha_venta = datetime.combine(fecha_venta.date(), datetime.min.time())
+
+                venta = Venta(
+                    tipo_documento=venta_data['tipo_documento'] or None,
+                    numero=venta_data['numero'] or None,
+                    cliente=cliente,
+                    fecha=fecha_venta,
+                    total=total,
+                    metodo_pago=metodo_pago_default,
+                    estado=estado_default
+                )
+                ventas_objs.append(venta)
+                ventas_items_map.append(venta_data['items'])
+
+            # Insertar ventas en lotes
+            batch_size = 5000
+            ventas_creadas = []
+            for i in range(0, len(ventas_objs), batch_size):
+                batch = ventas_objs[i:i + batch_size]
+                created = Venta.objects.bulk_create(batch)
+                ventas_creadas.extend(created)
+                logger.info(f"  ✓ Ventas insertadas: {len(ventas_creadas)}/{len(ventas_objs)}")
+
+            self.stats['ventas_insertadas'] = len(ventas_creadas)
+            logger.info(f"✅ {len(ventas_creadas)} ventas insertadas")
+
+            # 7. CREAR DETALLES
+            logger.info(f"📝 Creando detalles de venta...")
+            detalles_objs = []
+
+            for venta, items in zip(ventas_creadas, ventas_items_map):
+                for item in items:
+                    producto = productos_dict.get(item['codigo_producto'])
+                    if not producto:
+                        self.stats['productos_no_encontrados'] += 1
+                        continue
+
+                    subtotal = item['cantidad'] * item['precio_unitario']
+                    detalles_objs.append(DetalleVenta(
+                        venta=venta,
+                        producto=producto,
+                        cantidad=item['cantidad'],
+                        precio_unitario=item['precio_unitario'],
+                        subtotal=subtotal
+                    ))
+
+            # Insertar detalles en lotes
+            for i in range(0, len(detalles_objs), batch_size):
+                batch = detalles_objs[i:i + batch_size]
+                DetalleVenta.objects.bulk_create(batch)
+                logger.info(f"  ✓ Detalles insertados: {min(i + batch_size, len(detalles_objs))}/{len(detalles_objs)}")
+
+            self.stats['detalles_insertados'] = len(detalles_objs)
+            logger.info(f"✅ {len(detalles_objs)} detalles insertados")
+        else:
+            logger.info("ℹ️ No hay ventas nuevas para insertar")
+
+        logger.info(f"📊 RESUMEN: {self.stats['ventas_insertadas']} ventas nuevas, {self.stats['ventas_duplicadas']} duplicadas omitidas, {self.stats['clientes_actualizados']} clientes actualizados")
+
+    def _procesar_datos_cliente(self, cliente_rut, nombre_cliente, correo_cliente, nombre_es_real, clientes_dict, clientes_a_procesar, clientes_por_correo=None):
+        """
+        Procesa los datos de un cliente para crear o actualizar.
+        Esta función se llama para CADA fila, incluso si la venta ya existe,
+        permitiendo actualizar datos del cliente desde cualquier documento.
+
+        REGLAS DE IDENTIFICACIÓN:
+        1. RUT es el identificador principal
+        2. Si el RUT no existe pero el CORREO sí (y es válido), usar el cliente existente
+           Esto evita duplicados por RUT mal digitado
+        3. Solo crear cliente nuevo si no existe ni por RUT ni por correo
+        """
+        # Buscar cliente existente por RUT
+        cliente_por_rut = clientes_dict.get(cliente_rut)
+
+        # Buscar cliente existente por correo (si hay correo válido)
+        cliente_por_correo = None
+        if correo_cliente and clientes_por_correo:
+            cliente_por_correo = clientes_por_correo.get(correo_cliente.lower())
+
+        # CASO 1: Cliente existe por RUT
+        if cliente_por_rut:
+            # Cliente existe en BD por RUT - verificar si necesita actualización
+            necesita_actualizacion = False
+            nombre_nuevo = cliente_por_rut.nombre
+            correo_nuevo = cliente_por_rut.correo
+
+            if nombre_es_real and not self._es_nombre_real(cliente_por_rut.nombre):
+                nombre_nuevo = nombre_cliente
+                necesita_actualizacion = True
+
+            if correo_cliente and correo_cliente != cliente_por_rut.correo:
+                correo_nuevo = correo_cliente
+                necesita_actualizacion = True
+
+            if necesita_actualizacion:
+                if cliente_rut not in clientes_a_procesar:
+                    clientes_a_procesar[cliente_rut] = {
+                        'rut': cliente_rut,
+                        'nombre': nombre_nuevo,
+                        'correo': correo_nuevo,
+                        'es_nuevo': False
+                    }
+                else:
+                    if nombre_es_real:
+                        clientes_a_procesar[cliente_rut]['nombre'] = nombre_nuevo
+                    if correo_cliente:
+                        clientes_a_procesar[cliente_rut]['correo'] = correo_nuevo
+            return cliente_rut  # Retornar el RUT a usar
+
+        # CASO 2: RUT no existe, pero correo sí existe en otro cliente
+        # Esto indica probable error de digitación en RUT - usar cliente existente
+        if cliente_por_correo and correo_cliente:
+            rut_existente = cliente_por_correo.rut
+            logger.debug(f"⚠️ RUT {cliente_rut} no existe, pero correo {correo_cliente} pertenece a RUT {rut_existente}. Usando cliente existente.")
+
+            # Actualizar nombre si es mejor
+            if nombre_es_real and not self._es_nombre_real(cliente_por_correo.nombre):
+                if rut_existente not in clientes_a_procesar:
+                    clientes_a_procesar[rut_existente] = {
+                        'rut': rut_existente,
+                        'nombre': nombre_cliente,
+                        'correo': cliente_por_correo.correo,
+                        'es_nuevo': False
+                    }
+
+            # Mapear el RUT nuevo al cliente existente para esta sesión
+            clientes_dict[cliente_rut] = cliente_por_correo
+            return rut_existente  # Retornar el RUT del cliente existente
+
+        # CASO 3: Cliente completamente nuevo (no existe ni por RUT ni por correo)
+        if cliente_rut not in clientes_a_procesar:
+            clientes_a_procesar[cliente_rut] = {
+                'rut': cliente_rut,
+                'nombre': nombre_cliente if nombre_es_real else f'Cliente {cliente_rut}',
+                'correo': correo_cliente if correo_cliente else None,
+                'es_nuevo': True
+            }
+        else:
+            # Ya está en cola - actualizar si hay mejor info
+            if nombre_es_real and not self._es_nombre_real(clientes_a_procesar[cliente_rut]['nombre']):
+                clientes_a_procesar[cliente_rut]['nombre'] = nombre_cliente
+            if correo_cliente:
+                clientes_a_procesar[cliente_rut]['correo'] = correo_cliente
+
+        return cliente_rut
 
     def _get_or_create_cliente(self, cliente_id, nombre='', correo=''):
         """
